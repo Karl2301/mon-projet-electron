@@ -3,68 +3,74 @@ import { useState, useCallback } from 'react';
 const useNotifications = () => {
   const [notifications, setNotifications] = useState([]);
 
-  const addNotification = useCallback(({
-    type = 'info',
-    title = null,
-    message,
-    details = null,
-    duration = 5000,
-    autoDismiss = true
-  }) => {
-    const id = Date.now() + Math.random();
-    
+  const addNotification = useCallback((type, message, options = {}) => {
+    // Validation stricte : ne pas ajouter si le message est vide
+    if (!message || message.trim() === '') {
+      console.warn('Tentative d\'ajout d\'une notification avec un message vide:', { type, message, options });
+      return null;
+    }
+
     const notification = {
-      id,
+      id: Date.now() + Math.random(),
       type,
-      title,
-      message,
-      details,
-      duration,
-      autoDismiss
+      message: message.trim(),
+      title: options.title?.trim() || undefined,
+      details: options.details?.trim() || undefined,
+      autoDismiss: options.autoDismiss !== false,
+      duration: options.duration || 5000,
+      ...options
     };
 
     setNotifications(prev => [...prev, notification]);
-
-    // Auto-dismiss si activé
-    if (autoDismiss) {
-      setTimeout(() => {
-        removeNotification(id);
-      }, duration);
-    }
-
-    return id;
+    return notification.id;
   }, []);
 
   const removeNotification = useCallback((id) => {
     setNotifications(prev => prev.filter(notification => notification.id !== id));
   }, []);
 
-  const clearAllNotifications = useCallback(() => {
-    setNotifications([]);
-  }, []);
-
-  // Méthodes de raccourci pour différents types
   const success = useCallback((message, options = {}) => {
-    return addNotification({ type: 'success', message, ...options });
+    console.log('✅ SUCCESS notification called:', { message, options });
+    if (!message || message.trim() === '') {
+      console.warn('❌ SUCCESS notification avec message vide bloquée');
+      return null;
+    }
+    return addNotification('success', message, options);
   }, [addNotification]);
 
   const error = useCallback((message, options = {}) => {
-    return addNotification({ type: 'error', message, autoDismiss: false, ...options });
+    console.log('❌ ERROR notification called:', { message, options });
+    if (!message || message.trim() === '') {
+      console.warn('❌ ERROR notification avec message vide bloquée');
+      return null;
+    }
+    return addNotification('error', message, options);
   }, [addNotification]);
 
-  const warning = useCallback((message, options = {}) => {
-    return addNotification({ type: 'warning', message, ...options });
+  const warning = useCallback((message, options) => {
+    if (!message || message.trim() === '') return null;
+    return addNotification('warning', message, options);
   }, [addNotification]);
 
   const info = useCallback((message, options = {}) => {
-    return addNotification({ type: 'info', message, ...options });
+    // Debug plus détaillé
+    console.log('🔍 INFO notification called:', { 
+      message, 
+      options,
+      stack: new Error().stack?.split('\n')[2] // Voir d'où vient l'appel
+    });
+    
+    if (!message || message.trim() === '') {
+      console.warn('❌ INFO notification avec message vide bloquée');
+      console.warn('Stack trace:', new Error().stack);
+      return null;
+    }
+    return addNotification('info', message, options);
   }, [addNotification]);
 
   return {
     notifications,
-    addNotification,
     removeNotification,
-    clearAllNotifications,
     success,
     error,
     warning,

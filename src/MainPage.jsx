@@ -1,97 +1,229 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Button, 
-  Typography, 
-  Box, 
-  List, 
-  ListItem, 
-  ListItemText, 
-  Card,
-  CardContent,
-  Container,
-  Grid,
-  Alert,
-  Chip,
-  IconButton,
-  Paper,
-  Fade
-} from '@mui/material';
-import { 
-  FolderOpen, 
-  CloudDownload, 
   Email, 
+  CloudSync,
+  SyncDisabled,
+  Person,
+  Schedule,
   Download,
-  Refresh,
-  CheckCircle,
-  Info,
+  Folder,
+  Settings as SettingsIcon,
   ArrowBack,
   Attachment,
-  Star,
-  StarBorder,
-  MarkEmailRead,
   Reply,
   ReplyAll,
   Forward,
-  Delete,
-  Archive,
-  Settings,
-  FolderSpecial
+  FolderSpecial,
+  Refresh
 } from '@mui/icons-material';
 import Navigation from './Navigation';
 import SenderPathModal from './SenderPathModal';
 import SenderPathsManager from './SenderPathsManager';
-import ToastNotification from './ToastNotification';
+import GeneralSettings from './GeneralSettings';
 import useNotifications from './useNotifications';
+import ToastContainer from './ToastContainer';
 
 const MainPage = ({ user, onLogout, onShowPricing }) => {
-  const [folder, setFolder] = useState(null);
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [tokens, setTokens] = useState(null);
   const [messages, setMessages] = useState([]);
   const [selectedMessage, setSelectedMessage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [backgroundSync, setBackgroundSync] = useState(false);
   const [showSenderModal, setShowSenderModal] = useState(false);
-  const [showPathsManager, setShowPathsManager] = useState(false);
   const [currentSender, setCurrentSender] = useState(null);
+  const [showPathsManager, setShowPathsManager] = useState(false);
+  const [showGeneralSettings, setShowGeneralSettings] = useState(false);
+  
+  // Ajouter les états manquants
   const [senderPaths, setSenderPaths] = useState({});
+  const [syncStatus, setSyncStatus] = useState('idle'); // 'idle', 'syncing', 'success', 'error'
+  const [lastSyncTime, setLastSyncTime] = useState(null);
 
-  // Hook pour les notifications
   const { notifications, removeNotification, success, error, warning, info } = useNotifications();
+  const intervalRef = useRef(null);
+  const isFirstLoad = useRef(true);
 
+  // Initial load with notifications
   useEffect(() => {
-    const tryLoadTokens = async () => {
-      try {
-        const stored = await window.electronAPI.loadTokens();
-        if (stored?.refresh_token) {
-          const newTokens = await window.electronAPI.refreshToken(stored.refresh_token);
-          setTokens(newTokens);
-          success('Connexion automatique réussie', {
-            title: 'Authentification',
-            details: 'Connecté automatiquement à Outlook'
-          });
-          fetchUnreadMessages(newTokens.access_token);
-        } else if (stored?.access_token) {
-          setTokens(stored);
-          info('Session restaurée', {
-            title: 'Authentification'
-          });
-          fetchUnreadMessages(stored.access_token);
-        } else {
-          info('Connexion requise', {
-            title: 'Authentification'
-          });
-        }
-      } catch (error) {
-        error('Erreur lors du chargement des tokens', {
-          title: 'Erreur d\'authentification'
-        });
+    if (isFirstLoad.current) {
+      loadInitialData();
+      isFirstLoad.current = false;
+    }
+  }, []);
+
+  // Background sync setup
+  useEffect(() => {
+    // Start background sync after initial load
+    if (!initialLoading && tokens) {
+      startBackgroundSync();
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
       }
     };
+  }, [initialLoading, tokens]);
+
+  const loadMessages = async (silent = false, providedTokens = null) => {
+    if (!silent) {
+      setLoading(true);
+      info('Récupération des messages en cours...', {
+        title: 'Synchronisation'
+      });
+    }
+
+    try {
+      // Use provided tokens or current state tokens
+      const currentTokens = providedTokens || tokens;
+      let token = currentTokens?.access_token;
+      
+      if (!token && currentTokens?.refresh_token) {
+        const newTokens = await window.electronAPI.refreshToken(currentTokens.refresh_token);
+        setTokens(newTokens);
+        token = newTokens.access_token;
+      }
+      
+      if (!token) {
+        throw new Error('Token d\'accès non disponible');
+      }
+      
+      const data = await window.electronAPI.getMessages({ 
+        accessToken: token, 
+        top: 50,
+        filter: "isRead eq false"
+      });
+      
+      setMessages(data.value || []);
+      
+      return {
+        success: true,
+        count: data.value?.length || 0
+      };
+    } catch (loadError) {
+      console.error('Error loading messages:', loadError);
+      if (!silent) {
+        error('Erreur lors du chargement des messages', {
+          title: 'Erreur'
+        });
+      }
+      return {
+        success: false,
+        error: loadError.message
+      };
+    } finally {
+      if (!silent) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const loadInitialData = async () => {
+    setInitialLoading(true);
     
-    // Load sender paths
-    loadSenderPaths();
-    tryLoadTokens();
-  }, []);
+    try {
+      // Load sender paths first
+      await loadSenderPaths();
+      
+      // Try to load tokens and authenticate
+      const stored = await window.electronAPI.loadTokens();
+      if (stored?.refresh_token) {
+        info('Connexion automatique réussie', {
+          title: 'Authentification',
+          details: 'Connecté automatiquement à Outlook'
+        });
+        
+        try {
+          const newTokens = await window.electronAPI.refreshToken(stored.refresh_token);
+          setTokens(newTokens);
+          
+          // Load messages with notifications for initial load
+          const result = await loadMessages(false, newTokens); // Pass tokens directly
+          
+          if (result.success) {
+            success('Synchronisation terminée', {
+              title: 'Synchronisation',
+              details: `${result.count} messages récupérés`
+            });
+          }
+        } catch (refreshError) {
+          console.error('Error refreshing token:', refreshError);
+          error('Erreur lors de l\'actualisation du token', {
+            title: 'Erreur d\'authentification'
+          });
+        }
+      } else if (stored?.access_token) {
+        setTokens(stored);
+        info('Session restaurée', {
+          title: 'Authentification'
+        });
+        
+        const result = await loadMessages(false, stored); // Pass tokens directly
+        if (result.success) {
+          success('Messages chargés', {
+            title: 'Synchronisation',
+            details: `${result.count} messages récupérés`
+          });
+        }
+      } else {
+        // NE PAS afficher de notification ici car c'est normal de ne pas avoir de tokens
+        console.log('Aucun token stocké - authentification requise');
+      }
+    } catch (err) {
+      console.error('Error during initial load:', err);
+      error('Erreur lors de la synchronisation initiale', {
+        title: 'Erreur de synchronisation'
+      });
+    } finally {
+      setInitialLoading(false);
+    }
+  };
+
+  const startBackgroundSync = () => {
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    // Set up background sync every 5 seconds
+    intervalRef.current = setInterval(() => {
+      performBackgroundSync();
+    }, 5000);
+
+    console.log('🔄 Background sync started (every 5 seconds)');
+  };
+
+  const performBackgroundSync = async () => {
+    if (backgroundSync || !tokens) return; // Prevent overlapping syncs
+    
+    setBackgroundSync(true);
+    setSyncStatus('syncing');
+    
+    try {
+      const result = await loadMessages(true, tokens); // true = silent mode, pass current tokens
+      if (result.success) {
+        setSyncStatus('success');
+        setLastSyncTime(new Date());
+        // NE PAS afficher de notification pour la sync en arrière-plan
+        console.log(`🔄 Background sync réussi: ${result.count} messages`);
+      } else {
+        setSyncStatus('error');
+        console.warn('⚠️ Background sync échoué:', result.error);
+      }
+    } catch (syncError) {
+      console.error('Background sync error:', syncError);
+      setSyncStatus('error');
+    } finally {
+      setBackgroundSync(false);
+      
+      // Reset status after a short delay
+      setTimeout(() => {
+        setSyncStatus('idle');
+      }, 2000);
+    }
+  };
 
   const loadSenderPaths = async () => {
     try {
@@ -101,13 +233,13 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         pathsMap[path.sender_email] = path;
       });
       setSenderPaths(pathsMap);
-    } catch (error) {
-      console.error('Erreur lors du chargement des chemins:', error);
+    } catch (pathError) {
+      console.error('Error loading sender paths:', pathError);
     }
   };
 
-  const handlePathsUpdated = () => {
-    loadSenderPaths();
+  const handlePathsUpdated = async () => {
+    await loadSenderPaths();
     success('Configuration mise à jour', {
       title: 'Dossiers actualisés'
     });
@@ -132,47 +264,39 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         return false;
       }
       return true;
-    } catch (error) {
-      console.error('Erreur lors de la vérification du chemin:', error);
+    } catch (checkError) {
+      console.error('Erreur lors de la vérification du chemin:', checkError);
       return false;
     }
   };
 
-  const handleSaveSenderPath = async (folderPath) => {
-    if (!currentSender) return;
-
+  const handleSaveSenderPath = async (senderData) => {
     try {
-      await window.electronAPI.setSenderPath({
-        senderEmail: currentSender.email,
-        senderName: currentSender.name,
-        folderPath
-      });
+      const paths = await window.electronAPI.getAllSenderPaths();
+      const existingPath = paths.find(p => p.sender_email === senderData.senderEmail);
       
-      // Reload sender paths
-      await loadSenderPaths();
+      if (existingPath) {
+        // Expéditeur existant, mettre à jour
+        await window.electronAPI.updateSenderPath(senderData);
+        success('Chemin mis à jour', {
+          title: 'Expéditeur configuré'
+        });
+      } else {
+        // Nouvel expéditeur, sauvegarder directement
+        await window.electronAPI.setSenderPath(senderData);
+        success('Nouvel expéditeur configuré avec succès', {
+          title: 'Expéditeur ajouté',
+          details: `Dossier : ${senderData.folderPath}`
+        });
+      }
       
-      success('Dossier configuré avec succès', {
-        title: 'Configuration sauvegardée',
-        details: `Dossier configuré pour ${currentSender.name || currentSender.email}`
-      });
-      
-      setShowSenderModal(false);
       setCurrentSender(null);
+      setShowSenderModal(false);
+      await handlePathsUpdated();
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
-      error('Erreur lors de la configuration', {
-        title: 'Erreur de sauvegarde'
-      });
-    }
-  };
-
-  const chooseFolder = async () => {
-    const result = await window.electronAPI.selectFolder();
-    if (result) {
-      setFolder(result);
-      success('Dossier sélectionné', {
-        title: 'Configuration',
-        details: result
+      error('Erreur lors de la sauvegarde', {
+        title: 'Erreur'
       });
     }
   };
@@ -191,125 +315,164 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
       });
       
       const interval = setInterval(async () => {
-        const pol = await window.electronAPI.pollToken({ device_code: device.device_code });
-        if (pol.ok) {
-          clearInterval(interval);
-          setTokens(pol.data);
-          setDeviceInfo(null);
-          success('Authentification réussie !', {
-            title: 'Connexion établie'
-          });
-          fetchUnreadMessages(pol.data.access_token);
+        try {
+          const pol = await window.electronAPI.pollToken({ device_code: device.device_code });
+          if (pol.ok) {
+            clearInterval(interval);
+            setTokens(pol.data);
+            setDeviceInfo(null);
+            success('Authentification réussie !', {
+              title: 'Connexion établie'
+            });
+            
+            // Load messages after authentication
+            const result = await loadMessages(false, pol.data);
+            if (result.success) {
+              success('Messages chargés', {
+                title: 'Synchronisation',
+                details: `${result.count} messages récupérés`
+              });
+            }
+          }
+        } catch (pollError) {
+          console.error('Polling error:', pollError);
+          // NE PAS afficher de notification pour les erreurs de polling répétées
         }
       }, (device.interval || 5) * 1000);
-    } catch (err) {
+    } catch (authError) {
       error('Erreur lors de l\'authentification', {
         title: 'Erreur de connexion',
-        details: err.message
+        details: authError.message
       });
-    }
-  };
-
-  const fetchUnreadMessages = async (accessToken = null) => {
-    setLoading(true);
-    info('Récupération des messages en cours...', {
-      title: 'Synchronisation'
-    });
-    
-    try {
-      let token = accessToken || tokens?.access_token;
-      if (!token && tokens?.refresh_token) {
-        const newTokens = await window.electronAPI.refreshToken(tokens.refresh_token);
-        setTokens(newTokens);
-        token = newTokens.access_token;
-      }
-      if (!token) throw new Error('Token d\'accès non disponible');
-      
-      const data = await window.electronAPI.getMessages({ 
-        accessToken: token, 
-        top: 50,
-        filter: "isRead eq false"
-      });
-      
-      setMessages(data.value || []);
-      
-      if (data.value && data.value.length > 0) {
-        success(`${data.value.length} messages récupérés`, {
-          title: 'Synchronisation terminée'
-        });
-      } else {
-        info('Aucun nouveau message', {
-          title: 'Boîte de réception à jour'
-        });
-      }
-    } catch (err) {
-      error('Erreur lors de la récupération', {
-        title: 'Erreur de synchronisation',
-        details: err.message
-      });
-    } finally {
-      setLoading(false);
     }
   };
 
   const saveMessage = async (message) => {
     try {
-      const result = await window.electronAPI.saveFileWithSender({ message });
+      // Vérifier d'abord si l'expéditeur a un chemin configuré
+      const senderEmail = message.from?.emailAddress?.address;
+      if (!senderEmail) {
+        error('Erreur lors de la sauvegarde', {
+          title: 'Email invalide',
+          details: 'Impossible de déterminer l\'expéditeur du message'
+        });
+        return;
+      }
+
+      // Vérifier le chemin de l'expéditeur
+      const senderPath = await window.electronAPI.getSenderPath(senderEmail);
+      if (!senderPath) {
+        warning('Configuration requise', {
+          title: 'Dossier non configuré',
+          details: `Veuillez d'abord configurer un dossier pour ${message.from?.emailAddress?.name || senderEmail}`
+        });
+        await checkSenderPath(message);
+        return;
+      }
+
+      // Afficher une notification de début
+      info('Sauvegarde en cours...', {
+        title: 'Sauvegarde du message'
+      });
+
+      // Utiliser une fonction différente ou créer le fichier manuellement
+      const result = await window.electronAPI.saveMessage({
+        message: message,
+        senderPath: senderPath.folder_path,
+        senderEmail: senderEmail,
+        senderName: senderPath.sender_name || message.from?.emailAddress?.name
+      });
       
       if (result.success) {
         success('Message sauvegardé avec succès', {
           title: 'Sauvegarde terminée',
-          details: result.fileName
+          details: result.fileName || 'Fichier sauvegardé'
         });
       } else {
-        if (result.error.includes('Aucun chemin configuré')) {
-          await checkSenderPath(message);
-        } else {
-          error('Erreur lors de la sauvegarde', {
-            title: 'Erreur de fichier',
-            details: result.error
-          });
-        }
+        error('Erreur lors de la sauvegarde', {
+          title: 'Erreur de fichier',
+          details: result.error || 'Erreur inconnue lors de la sauvegarde'
+        });
       }
-    } catch (error) {
+    } catch (saveError) {
+      console.error('Erreur lors de la sauvegarde:', saveError);
+      
+      // Afficher plus de détails sur l'erreur
+      let errorMessage = 'Erreur inconnue';
+      if (saveError.message) {
+        errorMessage = saveError.message;
+      } else if (typeof saveError === 'string') {
+        errorMessage = saveError;
+      }
+      
       error('Erreur lors de la sauvegarde', {
-        title: 'Erreur système'
-      });
-    }
-  };
-
-  const logoutOutlook = async () => {
-    try {
-      const result = await window.electronAPI.deleteTokens();
-      if (result.success) {
-        setTokens(null);
-        setMessages([]);
-        setSelectedMessage(null);
-        setDeviceInfo(null);
-        success('Déconnexion réussie', {
-          title: 'Session fermée'
-        });
-      } else {
-        error('Erreur lors de la déconnexion', {
-          title: 'Erreur de déconnexion'
-        });
-      }
-    } catch (error) {
-      error('Erreur lors de la déconnexion', {
-        title: 'Erreur système'
+        title: 'Erreur système',
+        details: errorMessage
       });
     }
   };
 
   const handleMessageClick = async (message) => {
     setSelectedMessage(message);
-    
-    // Check if sender has configured path, show modal if not
     await checkSenderPath(message);
   };
 
   const getSenderPathInfo = (senderEmail) => {
     return senderPaths[senderEmail] || null;
+  };
+
+  const getSyncStatusIcon = () => {
+    switch (syncStatus) {
+      case 'syncing':
+        return <CloudSync className="text-blue-500 animate-spin" style={{ fontSize: 16 }} />;
+      case 'success':
+        return <CloudSync className="text-green-500" style={{ fontSize: 16 }} />;
+      case 'error':
+        return <SyncDisabled className="text-red-500" style={{ fontSize: 16 }} />;
+      default:
+        return <CloudSync className="text-gray-400" style={{ fontSize: 16 }} />;
+    }
+  };
+
+  const getSyncStatusText = () => {
+    switch (syncStatus) {
+      case 'syncing':
+        return 'Synchronisation...';
+      case 'success':
+        return 'Synchronisé';
+      case 'error':
+        return 'Erreur de sync';
+      default:
+        return 'En attente';
+    }
+  };
+
+  const formatLastSyncTime = () => {
+    if (!lastSyncTime) return 'Jamais';
+    const now = new Date();
+    const diff = Math.floor((now - lastSyncTime) / 1000);
+    
+    if (diff < 60) return `il y a ${diff}s`;
+    if (diff < 3600) return `il y a ${Math.floor(diff / 60)}min`;
+    return lastSyncTime.toLocaleTimeString();
+  };
+
+  const handleManualSync = () => {
+    if (!backgroundSync && tokens) {
+      // Pour la sync manuelle, on affiche les notifications
+      info('Synchronisation manuelle en cours...', {
+        title: 'Actualisation'
+      });
+      
+      loadMessages(false, tokens).then(result => {
+        if (result.success) {
+          success('Synchronisation terminée', {
+            title: 'Actualisation',
+            details: `${result.count} messages récupérés`
+          });
+        }
+      });
+    }
   };
 
   const formatDate = (dateString) => {
@@ -324,261 +487,393 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
     }
   };
 
+  // Si pas de tokens, afficher l'interface d'authentification
+  if (!tokens && !initialLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+        <Navigation user={user} onLogout={onLogout} onShowPricing={onShowPricing} />
+        
+        <div className="max-w-4xl mx-auto px-6 py-16">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Email className="text-blue-600" style={{ fontSize: 40 }} />
+            </div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">
+              Connectez-vous à Outlook
+            </h1>
+            <p className="text-gray-600 mb-8 text-lg">
+              Authentifiez-vous pour accéder à vos emails et commencer la synchronisation automatique
+            </p>
+            
+            {deviceInfo ? (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 max-w-md mx-auto">
+                <h3 className="font-semibold text-blue-900 mb-4">Authentification requise</h3>
+                <p className="text-sm text-blue-700 mb-4">
+                  Visitez le lien suivant et entrez le code :
+                </p>
+                <div className="bg-white rounded-lg p-4 mb-4">
+                  <p className="font-mono text-sm text-gray-600 break-all mb-2">
+                    {deviceInfo.verification_uri}
+                  </p>
+                  <p className="font-mono text-xl font-bold text-blue-600">
+                    {deviceInfo.user_code}
+                  </p>
+                </div>
+                <p className="text-xs text-blue-600">
+                  En attente de votre authentification...
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={startAuth}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-xl transition-colors inline-flex items-center"
+              >
+                <Email className="mr-2" style={{ fontSize: 20 }} />
+                Se connecter à Outlook
+              </button>
+            )}
+          </div>
+        </div>
+        
+        {/* Garder seulement le ToastContainer ici */}
+        <ToastContainer 
+          notifications={notifications} 
+          onRemove={removeNotification} 
+        />
+      </div>
+    );
+  }
+
+  if (initialLoading) {
+    return (
+      <>
+        <Navigation user={user} onLogout={onLogout} onShowPricing={onShowPricing} />
+        
+        <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Email className="text-blue-600 animate-pulse" style={{ fontSize: 32 }} />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              Chargement initial...
+            </h2>
+            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          </div>
+        </div>
+        
+        {/* Garder seulement le ToastContainer ici aussi */}
+        <ToastContainer 
+          notifications={notifications} 
+          onRemove={removeNotification} 
+        />
+      </>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-25 via-white to-blue-25">
       <Navigation user={user} onLogout={onLogout} onShowPricing={onShowPricing} />
       
-      {/* Notifications Toast */}
-      <ToastNotification 
-        notifications={notifications} 
-        onRemove={removeNotification} 
-      />
-      
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Header */}
+        {/* Header avec status de synchronisation */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2 tracking-tight">
-            {selectedMessage ? 'Lecture du message' : 'Boîte de réception'}
-          </h1>
-          <p className="text-gray-600 text-lg">
-            {selectedMessage ? (
-              <button 
-                onClick={() => setSelectedMessage(null)}
-                className="inline-flex items-center text-blue-600 hover:text-blue-800 transition-colors"
-              >
-                <ArrowBack className="mr-2" style={{ fontSize: 18 }} />
-                Retour à la liste
-              </button>
-            ) : (
-              <>
-                Vos messages non-lus 
-                <span className="text-blue-600 font-medium"> avec sauvegarde automatique</span>
-              </>
-            )}
-          </p>
-        </div>
-
-        {/* Outlook Connection */}
-        {!tokens && (
-          <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 p-8 mb-8 text-center shadow-sm">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 rounded-3xl mb-6">
-              <Email className="text-blue-600" style={{ fontSize: 28 }} />
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-4xl font-bold text-gray-900 mb-2 tracking-tight">
+                {selectedMessage ? 'Lecture du message' : 'Boîte de réception'}
+              </h1>
+              <p className="text-gray-600 text-lg">
+                {selectedMessage ? (
+                  <button 
+                    onClick={() => setSelectedMessage(null)}
+                    className="inline-flex items-center text-blue-600 hover:text-blue-800 transition-colors"
+                  >
+                    <ArrowBack className="mr-2" style={{ fontSize: 18 }} />
+                    Retour à la liste
+                  </button>
+                ) : (
+                  <>
+                    Vos messages non-lus 
+                    <span className="text-blue-600 font-medium"> avec sauvegarde automatique</span>
+                  </>
+                )}
+              </p>
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-3">
-              Connexion Outlook requise
-            </h3>
-            <p className="text-gray-600 mb-6 max-w-md mx-auto">
-              Connectez-vous à votre compte Outlook pour accéder à vos emails
-            </p>
-            <button 
-              onClick={startAuth} 
-              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium py-3 px-6 rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 shadow-lg"
-            >
-              Se connecter à Outlook
-            </button>
             
-            {deviceInfo && (
-              <div className="mt-6 p-4 bg-gradient-to-r from-blue-25 to-indigo-25 border border-blue-100 rounded-xl text-left max-w-md mx-auto">
-                <p className="text-sm text-gray-700 mb-2">
-                  <strong>Étape 1:</strong> Visitez le lien ci-dessous
-                </p>
-                <a 
-                  href={deviceInfo.verification_uri} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-blue-600 underline hover:no-underline font-medium"
+            {/* Sync Status */}
+            {tokens && (
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2 bg-white rounded-lg px-4 py-2 border border-gray-200">
+                  {getSyncStatusIcon()}
+                  <div className="text-sm">
+                    <div className="font-medium text-gray-900">
+                      {getSyncStatusText()}
+                    </div>
+                    <div className="text-gray-500 text-xs">
+                      Dernière sync: {formatLastSyncTime()}
+                    </div>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={handleManualSync}
+                  disabled={loading}
+                  className="p-2 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed text-blue-600 rounded-lg transition-colors"
+                  title="Synchroniser maintenant"
                 >
-                  {deviceInfo.verification_uri}
-                </a>
-                <p className="text-sm text-gray-700 mt-3 mb-1">
-                  <strong>Étape 2:</strong> Entrez ce code:
-                </p>
-                <code className="bg-white px-3 py-2 rounded border text-lg font-mono text-blue-700 border-blue-200">
-                  {deviceInfo.user_code}
-                </code>
+                  <CloudSync className={backgroundSync ? 'animate-spin' : ''} style={{ fontSize: 20 }} />
+                </button>
               </div>
             )}
           </div>
+        </div>
+
+        {/* Stats - VERSION COMPACTE */}
+        {tokens && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-xl p-4 border border-gray-100">
+              <div className="flex items-center">
+                <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center mr-3">
+                  <Email className="text-blue-600" style={{ fontSize: 18 }} />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600">Messages</p>
+                  <p className="text-lg font-bold text-gray-900">{messages.length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 border border-gray-100">
+              <div className="flex items-center">
+                <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center mr-3">
+                  <Person className="text-green-600" style={{ fontSize: 18 }} />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600">Expéditeurs</p>
+                  <p className="text-lg font-bold text-gray-900">{Object.keys(senderPaths).length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 border border-gray-100">
+              <div className="flex items-center">
+                <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center mr-3">
+                  <Schedule className="text-purple-600" style={{ fontSize: 18 }} />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600">Auto-sync</p>
+                  <p className="text-sm font-bold text-gray-900">Toutes les 5s</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 border border-gray-100">
+              <div className="flex items-center">
+                <div className="w-8 h-8 bg-orange-50 rounded-lg flex items-center justify-center mr-3">
+                  <Folder className="text-orange-600" style={{ fontSize: 18 }} />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-gray-600">Status</p>
+                  <p className="text-sm font-bold text-gray-900">{getSyncStatusText()}</p>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
-        {/* Interface Email */}
+        {/* Interface Email - HAUTEUR MAXIMALE */}
         {tokens && (
-          <div className="flex gap-6 h-[calc(100vh-280px)]">
-            {/* Liste des emails */}
-            <div className={`bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm transition-all duration-300 ${
-              selectedMessage ? 'w-1/3' : 'w-full'
-            }`}>
-              {/* Header de la liste */}
-              <div className="p-6 border-b border-gray-100">
-                <div className="flex items-center justify-between mb-4">
+          <>
+            {/* Action buttons - VERSION COMPACTE */}
+            <div className="flex space-x-4 mb-6">
+              <button
+                onClick={() => setShowPathsManager(true)}
+                className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
+              >
+                <SettingsIcon className="mr-2" style={{ fontSize: 16 }} />
+                Gérer les expéditeurs
+              </button>
+
+              <button
+                onClick={() => setShowGeneralSettings(true)}
+                className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
+              >
+                <Folder className="mr-2" style={{ fontSize: 16 }} />
+                Configuration générale
+              </button>
+              
+              <button 
+                onClick={handleManualSync} // Utilisez handleManualSync au lieu de loadMessages
+                disabled={loading || backgroundSync}
+                className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-xl transition-colors inline-flex items-center disabled:opacity-50 text-sm"
+              >
+                <Refresh className={`mr-2 ${loading || backgroundSync ? 'animate-spin' : ''}`} style={{ fontSize: 16 }} />
+                Actualiser manuellement
+              </button>
+            </div>
+
+            {/* HAUTEUR MAXIMALE POUR LES EMAILS */}
+            <div className="flex gap-6 min-h-[calc(100vh-280px)]">
+              {/* Liste des emails */}
+              <div className={`bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm transition-all duration-300 ${
+                selectedMessage ? 'w-1/3' : 'w-full'
+              }`}>
+                {/* Header de la liste */}
+                <div className="p-6 border-b border-gray-100">
                   <h3 className="text-xl font-semibold text-gray-900">
                     Messages non-lus ({messages.length})
                   </h3>
-                  <div className="flex items-center space-x-2">
-                    <button 
-                      onClick={() => setShowPathsManager(true)}
-                      className="bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2 px-4 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 inline-flex items-center"
-                      title="Gérer les dossiers d'enregistrement"
-                    >
-                      <Settings className="mr-2" style={{ fontSize: 18 }} />
-                      Dossiers
-                    </button>
-                    <button 
-                      onClick={() => fetchUnreadMessages()} 
-                      disabled={loading}
-                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 inline-flex items-center disabled:opacity-50"
-                    >
-                      <Refresh className={`mr-2 ${loading ? 'animate-spin' : ''}`} style={{ fontSize: 18 }} />
-                      Actualiser
-                    </button>
-                  </div>
+                </div>
+
+                {/* Liste des messages - SANS SCROLL, AFFICHAGE FIXE */}
+                <div className="divide-y divide-gray-100">
+                  {messages.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <Email className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                        Aucun message non-lu
+                      </h3>
+                      <p className="text-gray-600">
+                        Tous vos messages ont été lus
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {messages.map((message) => {
+                        const senderEmail = message.from?.emailAddress?.address;
+                        const senderPathInfo = getSenderPathInfo(senderEmail);
+                        
+                        return (
+                          <div 
+                            key={message.id}
+                            onClick={() => handleMessageClick(message)}
+                            className={`p-4 hover:bg-blue-25 cursor-pointer transition-colors duration-200 ${
+                              selectedMessage?.id === message.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : ''
+                            }`}
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0 pr-4">
+                                <div className="flex items-center mb-2">
+                                  <div className="w-2 h-2 bg-blue-500 rounded-full mr-3 flex-shrink-0"></div>
+                                  <p className="font-semibold text-gray-900 truncate flex-1">
+                                    {message.from?.emailAddress?.name || message.from?.emailAddress?.address}
+                                  </p>
+                                  <div className="flex items-center ml-2 flex-shrink-0">
+                                    {message.hasAttachments && (
+                                      <Attachment className="text-gray-400 mr-1" style={{ fontSize: 16 }} />
+                                    )}
+                                    {senderPathInfo && (
+                                      <FolderSpecial className="text-green-500" style={{ fontSize: 16 }} title="Dossier configuré" />
+                                    )}
+                                  </div>
+                                </div>
+                                <h4 className="font-medium text-gray-900 mb-1 truncate">
+                                  {message.subject || 'Sans sujet'}
+                                </h4>
+                                <p className="text-sm text-gray-600 line-clamp-2 break-words">
+                                  {message.bodyPreview}
+                                </p>
+                              </div>
+                              <div className="ml-4 flex-shrink-0 text-right">
+                                <p className="text-xs text-gray-500 mb-1 whitespace-nowrap">
+                                  {formatDate(message.receivedDateTime)}
+                                </p>
+                                {message.importance === 'high' && (
+                                  <div className="w-2 h-2 bg-red-500 rounded-full ml-auto"></div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Liste des messages */}
-              <div className="overflow-y-auto h-full">
-                {messages.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <Email className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                      Aucun message non-lu
-                    </h3>
-                    <p className="text-gray-600">
-                      Tous vos messages ont été lus
-                    </p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-gray-100">
-                    {messages.map((message) => {
-                      const senderEmail = message.from?.emailAddress?.address;
-                      const senderPathInfo = getSenderPathInfo(senderEmail);
-                      
-                      return (
-                        <div 
-                          key={message.id}
-                          onClick={() => handleMessageClick(message)}
-                          className={`p-4 hover:bg-blue-25 cursor-pointer transition-colors duration-200 ${
-                            selectedMessage?.id === message.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : ''
-                          }`}
-                        >
-                          <div className="flex items-start justify-between">
+              {/* Vue détaillée du message */}
+              {selectedMessage && (
+                <div className="w-2/3 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm flex flex-col">
+                  {/* Header du message */}
+                  <div className="p-6 border-b border-gray-100 flex-shrink-0">
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1 min-w-0 pr-4">
+                        <h2 className="text-xl font-bold text-gray-900 mb-2 break-words">
+                          {selectedMessage.subject || 'Sans sujet'}
+                        </h2>
+                        <div className="space-y-2">
+                          <div className="flex items-start">
+                            <span className="text-sm text-gray-500 w-16 flex-shrink-0">De:</span>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center mb-2">
-                                <div className="w-2 h-2 bg-blue-500 rounded-full mr-3 flex-shrink-0"></div>
-                                <p className="font-semibold text-gray-900 truncate">
-                                  {message.from?.emailAddress?.name || message.from?.emailAddress?.address}
-                                </p>
-                                {message.hasAttachments && (
-                                  <Attachment className="text-gray-400 ml-2" style={{ fontSize: 16 }} />
-                                )}
-                                {senderPathInfo && (
-                                  <FolderSpecial className="text-green-500 ml-2" style={{ fontSize: 16 }} title="Dossier configuré" />
-                                )}
-                              </div>
-                              <h4 className="font-medium text-gray-900 mb-1 truncate">
-                                {message.subject || 'Sans sujet'}
-                              </h4>
-                              <p className="text-sm text-gray-600 line-clamp-2">
-                                {message.bodyPreview}
-                              </p>
-                            </div>
-                            <div className="ml-4 flex-shrink-0 text-right">
-                              <p className="text-xs text-gray-500 mb-1">
-                                {formatDate(message.receivedDateTime)}
-                              </p>
-                              {message.importance === 'high' && (
-                                <div className="w-2 h-2 bg-red-500 rounded-full ml-auto"></div>
+                              <span className="text-sm text-gray-900 font-medium break-words">
+                                {selectedMessage.from?.emailAddress?.name || selectedMessage.from?.emailAddress?.address}
+                              </span>
+                              {getSenderPathInfo(selectedMessage.from?.emailAddress?.address) && (
+                                <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
+                                  Dossier configuré
+                                </div>
                               )}
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Vue détaillée du message */}
-            {selectedMessage && (
-              <div className="w-2/3 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm flex flex-col">
-                {/* Header du message */}
-                <div className="p-6 border-b border-gray-100">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <h2 className="text-xl font-bold text-gray-900 mb-2">
-                        {selectedMessage.subject || 'Sans sujet'}
-                      </h2>
-                      <div className="space-y-2">
-                        <div className="flex items-center">
-                          <span className="text-sm text-gray-500 w-16">De:</span>
-                          <span className="text-sm text-gray-900 font-medium">
-                            {selectedMessage.from?.emailAddress?.name || selectedMessage.from?.emailAddress?.address}
-                          </span>
-                          {getSenderPathInfo(selectedMessage.from?.emailAddress?.address) && (
-                            <div className="ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
-                              Dossier configuré
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center">
-                          <span className="text-sm text-gray-500 w-16">À:</span>
-                          <span className="text-sm text-gray-900">
-                            {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
-                          </span>
-                        </div>
-                        <div className="flex items-center">
-                          <span className="text-sm text-gray-500 w-16">Date:</span>
-                          <span className="text-sm text-gray-900">
-                            {new Date(selectedMessage.receivedDateTime).toLocaleString('fr-FR')}
-                          </span>
+                          <div className="flex items-start">
+                            <span className="text-sm text-gray-500 w-16 flex-shrink-0">À:</span>
+                            <span className="text-sm text-gray-900 break-words">
+                              {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
+                            </span>
+                          </div>
+                          <div className="flex items-start">
+                            <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
+                            <span className="text-sm text-gray-900">
+                              {new Date(selectedMessage.receivedDateTime).toLocaleString('fr-FR')}
+                            </span>
+                          </div>
                         </div>
                       </div>
+                      <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
+                        <button 
+                          onClick={() => saveMessage(selectedMessage)}
+                          className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                          title="Sauvegarder le message"
+                        >
+                          <Download style={{ fontSize: 18 }} className="text-blue-600" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center space-x-2 ml-4">
-                      <button 
-                        onClick={() => saveMessage(selectedMessage)}
-                        className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                        title="Sauvegarder le message"
-                      >
-                        <Download style={{ fontSize: 18 }} className="text-blue-600" />
+                    
+                    {/* Actions du message */}
+                    <div className="flex items-center space-x-2 flex-wrap">
+                      <button className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
+                        <Reply className="mr-2" style={{ fontSize: 16 }} />
+                        Répondre
+                      </button>
+                      <button className="bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
+                        <ReplyAll className="mr-2" style={{ fontSize: 16 }} />
+                        Répondre à tous
+                      </button>
+                      <button className="bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
+                        <Forward className="mr-2" style={{ fontSize: 16 }} />
+                        Transférer
                       </button>
                     </div>
                   </div>
-                  
-                  {/* Actions du message */}
-                  <div className="flex items-center space-x-2">
-                    <button className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
-                      <Reply className="mr-2" style={{ fontSize: 16 }} />
-                      Répondre
-                    </button>
-                    <button className="bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
-                      <ReplyAll className="mr-2" style={{ fontSize: 16 }} />
-                      Répondre à tous
-                    </button>
-                    <button className="bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
-                      <Forward className="mr-2" style={{ fontSize: 16 }} />
-                      Transférer
-                    </button>
+
+                  {/* Contenu du message */}
+                  <div className="flex-1 p-6 overflow-y-auto">
+                    <div 
+                      className="prose prose-sm max-w-none text-gray-900 break-words"
+                      dangerouslySetInnerHTML={{ 
+                        __html: selectedMessage.body?.content || selectedMessage.bodyPreview 
+                      }}
+                    />
                   </div>
                 </div>
-
-                {/* Contenu du message */}
-                <div className="flex-1 p-6 overflow-y-auto">
-                  <div 
-                    className="prose prose-sm max-w-none text-gray-900"
-                    dangerouslySetInnerHTML={{ 
-                      __html: selectedMessage.body?.content || selectedMessage.bodyPreview 
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 
-      {/* Modal pour configurer le chemin de l'expéditeur */}
+      {/* Modals */}
       <SenderPathModal
         isOpen={showSenderModal}
         onClose={() => {
@@ -589,11 +884,28 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         onSave={handleSaveSenderPath}
       />
 
-      {/* Modal pour gérer tous les chemins */}
       <SenderPathsManager
         isOpen={showPathsManager}
         onClose={() => setShowPathsManager(false)}
         onPathUpdated={handlePathsUpdated}
+      />
+
+      <GeneralSettings
+        isOpen={showGeneralSettings}
+        onClose={() => setShowGeneralSettings(false)}
+        onSettingsUpdated={(type, message, options) => {
+          if (type === 'success') {
+            success(message, options);
+          } else {
+            error(message, options);
+          }
+        }}
+      />
+
+      {/* Toast Notifications */}
+      <ToastContainer 
+        notifications={notifications} 
+        onRemove={removeNotification} 
       />
     </div>
   );

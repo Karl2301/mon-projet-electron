@@ -1,110 +1,127 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
+  Close, 
   CheckCircle, 
   Error, 
   Warning, 
-  Info, 
-  Close 
+  Info 
 } from '@mui/icons-material';
 
-const ToastNotification = ({ notifications, onRemove }) => {
-  const getIcon = (type) => {
+const ToastNotification = ({ 
+  id,
+  type = 'info', 
+  title, 
+  message, 
+  details,
+  autoDismiss = true, 
+  duration = 5000, 
+  onClose 
+}) => {
+  const [isVisible, setIsVisible] = useState(true);
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  // Validation : ne pas afficher si pas de contenu
+  if (!message && !title) {
+    // Notif vide, bloqué
+    return null;
+  }
+
+  useEffect(() => {
+    if (autoDismiss && duration > 0) {
+      const timer = setTimeout(() => {
+        handleClose();
+      }, duration);
+
+      return () => clearTimeout(timer);
+    }
+  }, [autoDismiss, duration]);
+
+  const handleClose = () => {
+    setIsLeaving(true);
+    setTimeout(() => {
+      setIsVisible(false);
+      if (onClose) {
+        onClose(id);
+      }
+    }, 300);
+  };
+
+  const getIcon = () => {
     switch (type) {
       case 'success':
         return <CheckCircle className="text-green-500" style={{ fontSize: 20 }} />;
       case 'error':
         return <Error className="text-red-500" style={{ fontSize: 20 }} />;
       case 'warning':
-        return <Warning className="text-amber-500" style={{ fontSize: 20 }} />;
+        return <Warning className="text-orange-500" style={{ fontSize: 20 }} />;
       default:
         return <Info className="text-blue-500" style={{ fontSize: 20 }} />;
     }
   };
 
-  const getBackgroundColor = (type) => {
+  const getBackgroundColor = () => {
     switch (type) {
       case 'success':
         return 'bg-green-50 border-green-200';
       case 'error':
         return 'bg-red-50 border-red-200';
       case 'warning':
-        return 'bg-amber-50 border-amber-200';
+        return 'bg-orange-50 border-orange-200';
       default:
         return 'bg-blue-50 border-blue-200';
     }
   };
 
-  const getTextColor = (type) => {
-    switch (type) {
-      case 'success':
-        return 'text-green-800';
-      case 'error':
-        return 'text-red-800';
-      case 'warning':
-        return 'text-amber-800';
-      default:
-        return 'text-blue-800';
-    }
-  };
+  if (!isVisible) return null;
 
   return (
-    <div className="fixed top-20 right-6 z-50 space-y-3 max-w-sm">
-      {notifications.map((notification) => (
-        <div
-          key={notification.id}
-          className={`
-            ${getBackgroundColor(notification.type)} 
-            ${getTextColor(notification.type)}
-            border rounded-xl p-4 shadow-lg backdrop-blur-sm
-            transform transition-all duration-300 ease-in-out
-            animate-slide-in-right
-          `}
-        >
-          <div className="flex items-start space-x-3">
-            <div className="flex-shrink-0 mt-0.5">
-              {getIcon(notification.type)}
-            </div>
-            <div className="flex-1 min-w-0">
-              {notification.title && (
-                <p className="font-semibold text-sm mb-1">
-                  {notification.title}
-                </p>
-              )}
-              <p className="text-sm leading-relaxed">
-                {notification.message}
-              </p>
-              {notification.details && (
-                <p className="text-xs mt-2 opacity-75 font-mono break-all">
-                  {notification.details}
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => onRemove(notification.id)}
-              className="flex-shrink-0 p-1 hover:bg-black/10 rounded-lg transition-colors"
-            >
-              <Close style={{ fontSize: 16 }} className="opacity-60" />
-            </button>
-          </div>
-          
-          {/* Barre de progression pour l'auto-dismiss */}
-          {notification.autoDismiss && (
-            <div className="mt-3 w-full bg-black/10 rounded-full h-1">
-              <div 
-                className={`h-1 rounded-full transition-all duration-${notification.duration}ms ease-linear ${
-                  notification.type === 'success' ? 'bg-green-500' :
-                  notification.type === 'error' ? 'bg-red-500' :
-                  notification.type === 'warning' ? 'bg-amber-500' : 'bg-blue-500'
-                }`}
-                style={{
-                  width: '100%',
-                  animation: `shrink ${notification.duration}ms linear forwards`
-                }}
-              />
-            </div>
+    <div
+      className={`
+        relative w-80 border rounded-xl shadow-xl p-4 backdrop-blur-sm
+        transform transition-all duration-300 ease-in-out
+        ${getBackgroundColor()}
+        ${isLeaving 
+          ? 'translate-x-full opacity-0 scale-95' 
+          : 'translate-x-0 opacity-100 scale-100'
+        }
+      `}
+      style={{
+        background: type === 'success' ? 'rgba(240, 253, 244, 0.95)' :
+                   type === 'error' ? 'rgba(254, 242, 242, 0.95)' :
+                   type === 'warning' ? 'rgba(255, 251, 235, 0.95)' :
+                   'rgba(239, 246, 255, 0.95)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+      }}
+    >
+      <div className="flex items-start space-x-3">
+        <div className="flex-shrink-0 mt-0.5">
+          {getIcon()}
+        </div>
+        <div className="flex-1 min-w-0">
+          {title && title.trim() && (
+            <h4 className="text-sm font-semibold text-gray-900 mb-1">
+              {title}
+            </h4>
+          )}
+          {message && message.trim() && (
+            <p className="text-sm text-gray-700 leading-relaxed">
+              {message}
+            </p>
+          )}
+          {details && details.trim() && (
+            <p className="text-xs text-gray-600 mt-2 leading-relaxed">
+              {details}
+            </p>
           )}
         </div>
-      ))}
+        <button
+          onClick={handleClose}
+          className="flex-shrink-0 p-1 hover:bg-gray-200/50 rounded-lg transition-colors duration-200"
+        >
+          <Close style={{ fontSize: 18 }} className="text-gray-500" />
+        </button>
+      </div>
     </div>
   );
 };

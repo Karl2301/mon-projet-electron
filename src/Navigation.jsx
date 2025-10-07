@@ -8,17 +8,37 @@ import {
   Close 
 } from '@mui/icons-material';
 import GeneralSettings from './GeneralSettings';
+import useNotifications from './useNotifications';
+import ToastNotification from './ToastNotification';
 
 const Navigation = ({ user, onLogout, onShowPricing }) => {
   const [showSettings, setShowSettings] = useState(false);
+  const { notifications, removeNotification, success, error, warning, info } = useNotifications();
 
-  const handleSettingsUpdated = () => {
-    // Callback when settings are updated
-    console.log('Settings updated');
+  const handleSettingsUpdated = (type, message, options = {}) => {
+    switch (type) {
+      case 'success':
+        success(message, options);
+        break;
+      case 'error':
+        error(message, options);
+        break;
+      case 'warning':
+        warning(message, options);
+        break;
+      default:
+        info(message, options);
+    }
   };
 
   return (
     <>
+      {/* Notifications Toast pour la navigation */}
+      <ToastNotification 
+        notifications={notifications} 
+        onRemove={removeNotification} 
+      />
+
       <nav className="bg-white/90 backdrop-blur-md border-b border-gray-100 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex items-center justify-between h-16">

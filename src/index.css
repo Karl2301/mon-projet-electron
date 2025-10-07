@@ -101,9 +101,35 @@
   animation: slideUp 0.3s ease-out;
 }
 
-/* Animations pour les notifications toast */
+/* Animations pour les notifications */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
 .animate-slide-in-right {
-  animation: slideInRight 0.3s ease-out forwards;
+  animation: slide-in-right 0.3s ease-out forwards;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 0.3s ease-in forwards;
 }
 
 @keyframes fadeIn {
@@ -184,4 +210,27 @@
 .prose ol {
   list-style-type: decimal;
   margin-left: 1.5em;
+}
+
+/* Scroll personnalisé pour le conteneur de notifications */
+.notifications-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+}
+
+.notifications-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.notifications-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notifications-container::-webkit-scrollbar-thumb {
+  background-color: rgba(156, 163, 175, 0.5);
+  border-radius: 2px;
+}
+
+.notifications-container::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(156, 163, 175, 0.8);
 }
