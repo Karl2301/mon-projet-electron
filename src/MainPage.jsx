@@ -666,7 +666,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                   </button>
                 ) : (
                   <>
-                    Vos mails non-lus
+                    Vos messages non-lus
                     <span className="text-blue-600 font-medium"> avec sauvegarde automatique</span>
                   </>
                 )}
