@@ -1,0 +1,208 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+        
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build CSS
+        run: npm run build-css
+        
+      - name: Create oauth.config.json (if needed)
+        run: |
+          if [ ! -f "./src/oauth.config.json" ]; then
+            echo '{"clientId":"${{ secrets.OAUTH_CLIENT_ID }}","tenant":"common","scopes":"offline_access Mail.Read"}' > ./src/oauth.config.json
+          fi
+        shell: bash
+        
+      - name: Build and package for macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          npm run package
+          npm run make
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          
+      - name: Build and package for Windows
+        if: matrix.os == 'windows-latest'
+        run: |
+          npm run package
+          npm run make
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          
+      - name: Build and package for Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          npm run package
+          npm run make
+          
+      - name: List build artifacts
+        run: |
+          echo "Build artifacts:"
+          find ./out -type f -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.rpm" -o -name "*.zip" | head -20
+        shell: bash
+        
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-artifacts
+          path: |
+            out/**/*.dmg
+            out/**/*.exe
+            out/**/*.deb
+            out/**/*.rpm
+            out/**/*.zip
+          retention-days: 5
+          
+  create-release:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v4
+        
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+          
+      - name: Display structure of downloaded files
+        run: ls -la ./artifacts/
+        
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## 🚀 Release ${{ steps.version.outputs.VERSION }}
+          
+          ### 📧 Mon Projet Electron - Gestionnaire d'emails Outlook
+          
+          Cette release inclut les packages pour toutes les plateformes supportées :
+          
+          - **macOS** : Fichier `.dmg` pour installation sur Mac
+          - **Windows** : Fichier `.exe` pour installation sur Windows  
+          - **Linux** : Fichiers `.deb` (Ubuntu/Debian) et `.rpm` (CentOS/Fedora)
+          
+          ### ✨ Fonctionnalités principales
+          - Synchronisation avec Outlook via Microsoft Graph API
+          - Sauvegarde intelligente des emails
+          - Gestion automatique des dossiers clients
+          - Interface moderne et intuitive
+          - Mode hors ligne avec cache
+          
+          ### 📥 Installation
+          1. Téléchargez le fichier correspondant à votre système d'exploitation
+          2. Exécutez l'installateur
+          3. Suivez les instructions à l'écran
+          
+          ### 🔧 Configuration requise
+          - Compte Microsoft Outlook/Office 365
+          - Connexion Internet pour la synchronisation
+          - Permissions d'écriture sur le système de fichiers
+          
+          ---
+          
+          **Note :** Cette application nécessite une configuration OAuth. Contactez l'administrateur pour obtenir les clés d'API si nécessaire.
+          EOF
+          
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          release_name: 'Mon Projet Electron ${{ steps.version.outputs.VERSION }}'
+          body_path: ./release_notes.md
+          draft: false
+          prerelease: false
+          
+      - name: Upload macOS DMG
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/macos-latest-artifacts/out/make/mon-projet-electron-${{ steps.version.outputs.VERSION }}.dmg
+          asset_name: mon-projet-electron-macos-${{ steps.version.outputs.VERSION }}.dmg
+          asset_content_type: application/octet-stream
+        continue-on-error: true
+        
+      - name: Upload Windows EXE
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/windows-latest-artifacts/out/make/squirrel.windows/x64/mon-projet-electron Setup ${{ steps.version.outputs.VERSION }}.exe
+          asset_name: mon-projet-electron-windows-${{ steps.version.outputs.VERSION }}.exe
+          asset_content_type: application/octet-stream
+        continue-on-error: true
+        
+      - name: Upload Linux DEB
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/ubuntu-latest-artifacts/out/make/deb/x64/mon-projet-electron_${{ steps.version.outputs.VERSION }}_amd64.deb
+          asset_name: mon-projet-electron-linux-${{ steps.version.outputs.VERSION }}.deb
+          asset_content_type: application/octet-stream
+        continue-on-error: true
+        
+      - name: Upload Linux RPM
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/ubuntu-latest-artifacts/out/make/rpm/x64/mon-projet-electron-${{ steps.version.outputs.VERSION }}-1.x86_64.rpm
+          asset_name: mon-projet-electron-linux-${{ steps.version.outputs.VERSION }}.rpm
+          asset_content_type: application/octet-stream
+        continue-on-error: true
+        
+      - name: Upload Windows ZIP (portable)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts/windows-latest-artifacts/out/make/zip/win32/x64/mon-projet-electron-win32-x64-${{ steps.version.outputs.VERSION }}.zip
+          asset_name: mon-projet-electron-windows-portable-${{ steps.version.outputs.VERSION }}.zip
+          asset_content_type: application/zip
+        continue-on-error: true

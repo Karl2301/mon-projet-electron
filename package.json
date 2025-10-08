@@ -5,12 +5,18 @@
   "description": "My Electron application description",
   "main": ".vite/build/main.js",
   "scripts": {
+    "dev": "electron-forge start",
     "start": "electron-forge start",
+    "web": "vite serve src --port 5000 --host --open",
+    "web:build": "vite build src --outDir ../dist-web --emptyOutDir",
+    "web:preview": "vite preview dist-web --port 5000 --host --open",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "lint": "echo \"No linting configured\"",
-    "build-css": "tailwindcss -i ./src/index.css -o ./dist/output.css --watch"
+    "build-css": "tailwindcss -i ./src/index.css -o ./dist/output.css --watch",
+    "build-css:prod": "tailwindcss -i ./src/index.css -o ./dist/output.css --minify",
+    "release": "npm run build-css:prod && electron-forge publish"
   },
   "keywords": [],
   "author": "karlrahuel",
