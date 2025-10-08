@@ -89,12 +89,13 @@
         }
       ],
       "plugins": [
-        {
-          "name": "@electron-forge/plugin-auto-unpack-natives"
-        },
-        {
-          "name": "@electron-forge/plugin-fuses",
-          "config": {
+        [
+          "@electron-forge/plugin-auto-unpack-natives",
+          {}
+        ],
+        [
+          "@electron-forge/plugin-fuses",
+          {
             "version": "1.8.0",
             "enableCookieEncryption": true,
             "enableNodeOptionsEnvironmentVariable": false,
@@ -102,10 +103,10 @@
             "enableEmbeddedAsarIntegrityValidation": true,
             "onlyLoadAppFromAsar": true
           }
-        },
-        {
-          "name": "@electron-forge/plugin-vite",
-          "config": {
+        ],
+        [
+          "@electron-forge/plugin-vite",
+          {
             "build": [
               {
                 "entry": "src/main.js",
@@ -125,7 +126,7 @@
               }
             ]
           }
-        }
+        ]
       ],
       "publishers": [
         {
