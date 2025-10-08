@@ -38,6 +38,14 @@ jobs:
       - name: Build CSS
         run: npm run build-css
         
+      - name: Create assets directory and placeholder icon
+        run: |
+          mkdir -p ./assets
+          # Créer une icône temporaire pour les tests
+          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > ./assets/icon.png
+          cp ./assets/icon.png ./assets/icon.ico
+        shell: bash
+        
       - name: Create oauth.config.json (if needed)
         run: |
           if [ ! -f "./src/oauth.config.json" ]; then

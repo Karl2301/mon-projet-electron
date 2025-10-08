@@ -21,6 +21,127 @@
   "keywords": [],
   "author": "karlrahuel",
   "license": "MIT",
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "name": "Mon Projet Electron",
+        "executableName": "mon-projet-electron",
+        "icon": "./assets/icon",
+        "extraResource": [
+          "./src/oauth.config.json"
+        ],
+        "ignore": [
+          "/node_modules",
+          "/\\.vscode",
+          "/\\.git",
+          "/dist-web",
+          "/out"
+        ]
+      },
+      "rebuildConfig": {},
+      "makers": [
+        {
+          "name": "@electron-forge/maker-squirrel",
+          "config": {
+            "name": "mon_projet_electron",
+            "setupExe": "MonProjetElectronSetup.exe",
+            "setupIcon": "./assets/icon.ico"
+          },
+          "platforms": ["win32"]
+        },
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": ["darwin", "win32"]
+        },
+        {
+          "name": "@electron-forge/maker-deb",
+          "config": {
+            "name": "mon-projet-electron",
+            "productName": "Mon Projet Electron",
+            "genericName": "Gestionnaire d'emails Outlook",
+            "description": "Application de gestion et sauvegarde d'emails Outlook",
+            "categories": ["Office", "Email"],
+            "icon": "./assets/icon.png",
+            "homepage": "https://github.com/karlrahuel/mon-projet-electron",
+            "maintainer": "Karl Rahuel",
+            "section": "utils",
+            "priority": "optional",
+            "depends": ["gconf2", "gconf-service", "libnotify4", "libappindicator1", "libxtst6", "libnss3"],
+            "recommends": ["pulseaudio"]
+          },
+          "platforms": ["linux"]
+        },
+        {
+          "name": "@electron-forge/maker-rpm",
+          "config": {
+            "name": "mon-projet-electron",
+            "productName": "Mon Projet Electron",
+            "genericName": "Gestionnaire d'emails Outlook",
+            "description": "Application de gestion et sauvegarde d'emails Outlook",
+            "categories": ["Office", "Email"],
+            "icon": "./assets/icon.png",
+            "homepage": "https://github.com/karlrahuel/mon-projet-electron",
+            "license": "MIT",
+            "requires": ["gconf2", "libnotify", "libappindicator-gtk3", "libXtst", "nss"],
+            "vendor": "Karl Rahuel"
+          },
+          "platforms": ["linux"]
+        }
+      ],
+      "plugins": [
+        {
+          "name": "@electron-forge/plugin-auto-unpack-natives"
+        },
+        {
+          "name": "@electron-forge/plugin-fuses",
+          "config": {
+            "version": "1.8.0",
+            "enableCookieEncryption": true,
+            "enableNodeOptionsEnvironmentVariable": false,
+            "enableNodeCliInspectArguments": false,
+            "enableEmbeddedAsarIntegrityValidation": true,
+            "onlyLoadAppFromAsar": true
+          }
+        },
+        {
+          "name": "@electron-forge/plugin-vite",
+          "config": {
+            "build": [
+              {
+                "entry": "src/main.js",
+                "config": "vite.main.config.js",
+                "target": "main"
+              },
+              {
+                "entry": "src/preload.js",
+                "config": "vite.preload.config.js",
+                "target": "preload"
+              }
+            ],
+            "renderer": [
+              {
+                "name": "main_window",
+                "config": "vite.renderer.config.js"
+              }
+            ]
+          }
+        }
+      ],
+      "publishers": [
+        {
+          "name": "@electron-forge/publisher-github",
+          "config": {
+            "repository": {
+              "owner": "karlrahuel",
+              "name": "mon-projet-electron"
+            },
+            "prerelease": false,
+            "draft": true
+          }
+        }
+      ]
+    }
+  },
   "devDependencies": {
     "@electron-forge/cli": "^7.9.0",
     "@electron-forge/maker-deb": "^7.9.0",
