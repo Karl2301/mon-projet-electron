@@ -735,6 +735,42 @@ ipcMain.handle('outlook:get-messages-cached', async (event, { accessToken, top =
 const APP_STATE_FILE = path.join(app.getPath('userData'), 'app_state.json');
 const CACHED_MESSAGES_FILE = path.join(app.getPath('userData'), 'cached_messages.json');
 
+// Function to clean email content and remove problematic CID images
+function cleanEmailContent(message) {
+  if (!message) return message;
+  
+  // Clone the message to avoid modifying the original
+  const cleanedMessage = { ...message };
+  
+  // Clean the body content if it exists
+  if (cleanedMessage.body && cleanedMessage.body.content) {
+    let content = cleanedMessage.body.content;
+    
+    // Remove all CID images that cause console spam
+    content = content.replace(/src\s*=\s*["']cid:[^"']*["']/gi, 'src=""');
+    content = content.replace(/<img[^>]*src\s*=\s*["']cid:[^"']*["'][^>]*>/gi, '');
+    
+    // Remove other problematic image sources
+    content = content.replace(/src\s*=\s*["']data:image\/[^"']*["']/gi, 'src=""');
+    
+    // Remove inline styles that might reference CID images
+    content = content.replace(/background-image\s*:\s*url\(cid:[^)]*\)/gi, '');
+    
+    // Clean up empty img tags
+    content = content.replace(/<img[^>]*src\s*=\s*["']["'][^>]*>/gi, '');
+    
+    cleanedMessage.body.content = content;
+  }
+  
+  return cleanedMessage;
+}
+
+// Function to clean an array of messages
+function cleanMessages(messages) {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map(cleanEmailContent);
+}
+
 // Cache functions
 function loadCachedMessages() {
   try {

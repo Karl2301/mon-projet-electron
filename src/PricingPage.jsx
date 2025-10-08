@@ -50,7 +50,7 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
     },
     {
       name: 'Enterprise',
-      price: '99999999999',
+      price: '99',
       description: 'Pour les équipes',
       features: [
         'Toutes les fonctionnalités',
