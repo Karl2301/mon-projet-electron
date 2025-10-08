@@ -35,6 +35,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Folder operations
   createClientFolder: (clientName) => ipcRenderer.invoke('folder:create-client', clientName),
   deployFolderStructure: (data) => ipcRenderer.invoke('folder:deploy-structure', data),
+  
+  // State management
+  getAppState: () => ipcRenderer.invoke('app:get-state'),
+  saveAppState: (state) => ipcRenderer.invoke('app:save-state', state),
+  clearAppState: () => ipcRenderer.invoke('app:clear-state'),
+  
+  // Enhanced message operations with caching
+  getMessagesWithCache: (params) => ipcRenderer.invoke('outlook:get-messages-cached', params),
+  getCachedMessages: () => ipcRenderer.invoke('app:get-cached-messages'),
+  saveCachedMessages: (messages) => ipcRenderer.invoke('app:save-cached-messages', messages),
+  
+  // Enhanced message operations with pagination
+  getMessagesWithPagination: (params) => ipcRenderer.invoke('outlook:get-messages-paginated', params),
+  
+  // Enhanced save message operations with suggestions
+  saveMessageWithSuggestion: (data) => ipcRenderer.invoke('save-message-with-suggestion', data),
+  saveMessageToPath: (data) => ipcRenderer.invoke('save-message-to-path', data),
+  
+  // Utility functions
+  openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
 });
 
 // AJOUTER CE LOG À LA FIN

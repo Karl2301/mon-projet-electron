@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -267,6 +267,15 @@ ipcMain.handle('save-message', async (event, { message, senderPath, senderEmail,
       return { success: false, error: 'Aucun chemin configuré pour cet expéditeur' };
     }
     
+    // Get general settings to check for email deposit folder
+    const settings = loadGeneralSettings();
+    let finalPath = senderPath;
+    
+    // If emailDepositFolder is configured, use it as a subfolder
+    if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
+      finalPath = path.join(senderPath, settings.emailDepositFolder);
+    }
+    
     // Create filename
     const date = new Date(message.receivedDateTime);
     const dateStr = date.toISOString().split('T')[0];
@@ -274,11 +283,11 @@ ipcMain.handle('save-message', async (event, { message, senderPath, senderEmail,
     const subject = (message.subject || 'Sans_sujet').replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
     const fileName = `${dateStr}_${timeStr}_${subject}.json`;
     
-    const filePath = path.join(senderPath, fileName);
+    const filePath = path.join(finalPath, fileName);
     
     // Ensure directory exists
-    if (!fs.existsSync(senderPath)) {
-      fs.mkdirSync(senderPath, { recursive: true });
+    if (!fs.existsSync(finalPath)) {
+      fs.mkdirSync(finalPath, { recursive: true });
     }
     
     // Save file
@@ -289,7 +298,8 @@ ipcMain.handle('save-message', async (event, { message, senderPath, senderEmail,
       filePath,
       fileName,
       senderEmail,
-      senderName
+      senderName,
+      depositFolder: settings.emailDepositFolder || null
     };
   } catch (error) {
     console.error('Error saving message:', error);
@@ -401,6 +411,45 @@ const createWindow = () => {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
     },
+  });
+
+  // Gérer les liens externes - les ouvrir dans le navigateur par défaut
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    console.log('🔗 Tentative d\'ouverture d\'un lien externe:', url);
+    
+    // Vérifier si c'est un lien externe (pas localhost ou file://)
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      // Ne pas ouvrir dans l'app Electron, mais dans le navigateur externe
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    
+    // Pour les autres types de liens, permettre l'ouverture dans l'app
+    return { action: 'allow' };
+  });
+
+  // Intercepter les tentatives de navigation pour les liens externes
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    const parsedUrl = new URL(navigationUrl);
+    
+    console.log('🧭 Tentative de navigation vers:', navigationUrl);
+    
+    // Si c'est une navigation vers un site externe
+    if (parsedUrl.origin !== 'http://localhost:5173' && // Dev server
+        parsedUrl.origin !== 'file://' && // App packagée
+        !navigationUrl.includes('login.microsoftonline.com')) { // Permettre OAuth Microsoft
+      
+      console.log('🚫 Navigation externe bloquée, ouverture dans le navigateur');
+      event.preventDefault();
+      shell.openExternal(navigationUrl);
+    }
+  });
+
+  // Gérer les nouveaux liens (target="_blank", window.open, etc.)
+  mainWindow.webContents.on('new-window', (event, navigationUrl) => {
+    console.log('🆕 Nouvelle fenêtre demandée pour:', navigationUrl);
+    event.preventDefault();
+    shell.openExternal(navigationUrl);
   });
 
   // Load the app
@@ -559,8 +608,160 @@ ipcMain.handle('outlook:get-messages', async (event, { accessToken, top = 25, fi
     throw new Error('Graph request failed: ' + txt);
   }
   const data = await res.json();
+  
+  // Clean the messages before returning them
+  if (data.value) {
+    data.value = cleanMessages(data.value);
+  }
+  
   return data;
 });
+
+// Enhanced messages handler with pagination and content cleaning
+ipcMain.handle('outlook:get-messages-paginated', async (event, { accessToken, top = 25, skip = 0, nextUrl = null, filter = null }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) throw new Error('No access token available');
+
+  try {
+    let url;
+    
+    // Si on a une URL de page suivante, l'utiliser directement
+    if (nextUrl) {
+      url = nextUrl;
+    } else {
+      // Sinon, construire l'URL avec les paramètres
+      url = `https://graph.microsoft.com/v1.0/me/messages?$top=${top}&$skip=${skip}`;
+      if (filter) {
+        url += `&$filter=${encodeURIComponent(filter)}`;
+      }
+      // Ajouter l'orderby pour avoir les emails les plus récents en premier
+      url += '&$orderby=receivedDateTime desc';
+    }
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error('Graph request failed: ' + txt);
+    }
+    
+    const data = await res.json();
+    
+    // Clean the messages before processing them
+    if (data.value) {
+      data.value = cleanMessages(data.value);
+    }
+    
+    // Sauvegarder en cache seulement si c'est la première page
+    if (skip === 0 && !nextUrl && data.value && data.value.length > 0) {
+      saveCachedMessages(data.value);
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error fetching paginated messages:', error);
+    throw error;
+  }
+});
+
+// Enhanced messages handler with caching and content cleaning
+ipcMain.handle('outlook:get-messages-cached', async (event, { accessToken, top = 25, filter = null, useCache = true }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) throw new Error('No access token available');
+
+  try {
+    let url = `https://graph.microsoft.com/v1.0/me/messages?$top=${top}`;
+    if (filter) {
+      url += `&$filter=${encodeURIComponent(filter)}`;
+    }
+    // Ajouter l'orderby pour avoir les emails les plus récents en premier
+    url += '&$orderby=receivedDateTime desc';
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    
+    if (!res.ok) {
+      // Si l'API échoue et que le cache est autorisé, retourner les messages mis en cache
+      if (useCache) {
+        const cachedMessages = loadCachedMessages();
+        if (cachedMessages.length > 0) {
+          return {
+            value: cleanMessages(cachedMessages), // Clean cached messages too
+            fromCache: true,
+            error: 'API unavailable, showing cached data'
+          };
+        }
+      }
+      const txt = await res.text();
+      throw new Error('Graph request failed: ' + txt);
+    }
+    
+    const data = await res.json();
+    
+    // Clean the messages before processing them
+    if (data.value) {
+      data.value = cleanMessages(data.value);
+    }
+    
+    // Sauvegarder en cache les nouveaux messages
+    if (data.value && data.value.length > 0) {
+      saveCachedMessages(data.value);
+    }
+    
+    return {
+      ...data,
+      fromCache: false
+    };
+  } catch (error) {
+    // En cas d'erreur, essayer de retourner les données mises en cache
+    if (useCache) {
+      const cachedMessages = loadCachedMessages();
+      if (cachedMessages.length > 0) {
+        return {
+          value: cleanMessages(cachedMessages), // Clean cached messages too
+          fromCache: true,
+          error: error.message
+        };
+      }
+    }
+    throw error;
+  }
+});
+
+// Path for app state storage
+const APP_STATE_FILE = path.join(app.getPath('userData'), 'app_state.json');
+const CACHED_MESSAGES_FILE = path.join(app.getPath('userData'), 'cached_messages.json');
+
+// Cache functions
+function loadCachedMessages() {
+  try {
+    if (fs.existsSync(CACHED_MESSAGES_FILE)) {
+      const data = fs.readFileSync(CACHED_MESSAGES_FILE, 'utf8');
+      const messages = JSON.parse(data);
+      return cleanMessages(messages); // Clean cached messages when loading
+    }
+    return [];
+  } catch (error) {
+    console.error('Error loading cached messages:', error);
+    return [];
+  }
+}
+
+function saveCachedMessages(messages) {
+  try {
+    // Clean messages before caching them
+    const cleanedMessages = cleanMessages(messages);
+    // Limit to 100 most recent messages
+    const limitedMessages = cleanedMessages.slice(0, 100);
+    fs.writeFileSync(CACHED_MESSAGES_FILE, JSON.stringify(limitedMessages, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Error saving cached messages:', error);
+    throw error;
+  }
+}
 
 // File handlers
 ipcMain.handle('file:save', async (event, { folderPath, fileName, content }) => {
@@ -617,6 +818,15 @@ ipcMain.handle('file:save-with-sender', async (event, { message, customPath = nu
       return { success: false, error: 'Aucun chemin configuré pour cet expéditeur' };
     }
     
+    // Get general settings to check for email deposit folder
+    const settings = loadGeneralSettings();
+    let finalPath = folderPath;
+    
+    // If emailDepositFolder is configured, use it as a subfolder
+    if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
+      finalPath = path.join(folderPath, settings.emailDepositFolder);
+    }
+    
     // Create filename
     const date = new Date(message.receivedDateTime);
     const dateStr = date.toISOString().split('T')[0];
@@ -624,7 +834,12 @@ ipcMain.handle('file:save-with-sender', async (event, { message, customPath = nu
     const subject = (message.subject || 'Sans_sujet').replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
     const fileName = `${dateStr}_${timeStr}_${subject}.json`;
     
-    const filePath = path.join(folderPath, fileName);
+    const filePath = path.join(finalPath, fileName);
+    
+    // Ensure directory exists
+    if (!fs.existsSync(finalPath)) {
+      fs.mkdirSync(finalPath, { recursive: true });
+    }
     
     // Save file
     fs.writeFileSync(filePath, JSON.stringify(message, null, 2));
@@ -635,7 +850,8 @@ ipcMain.handle('file:save-with-sender', async (event, { message, customPath = nu
       fileName,
       senderEmail,
       senderName,
-      autoCreated: customPath === null && !loadSenderPaths()[senderEmail]
+      autoCreated: customPath === null && !loadSenderPaths()[senderEmail],
+      depositFolder: settings.emailDepositFolder || null
     };
   } catch (error) {
     return { success: false, error: error.message };
@@ -792,5 +1008,292 @@ ipcMain.handle('settings:save-general', async (event, settings) => {
   } catch (error) {
     console.error('Error saving general settings:', error);
     throw error;
+  }
+});
+
+// Function to suggest client based on sender email and name
+function suggestClientForEmail(senderEmail, senderName) {
+  try {
+    const paths = loadSenderPaths();
+    const settings = loadGeneralSettings();
+    
+    // Check if sender already has a configured path
+    if (paths[senderEmail]) {
+      return {
+        type: 'existing',
+        clientName: path.basename(paths[senderEmail].folder_path),
+        folderPath: paths[senderEmail].folder_path,
+        confidence: 'high',
+        reason: 'Expéditeur déjà configuré'
+      };
+    }
+    
+    // Try to match by domain
+    const domain = senderEmail.split('@')[1];
+    const domainSuggestions = Object.values(paths).filter(p => 
+      p.sender_email.split('@')[1] === domain
+    );
+    
+    if (domainSuggestions.length > 0) {
+      const suggestion = domainSuggestions[0];
+      return {
+        type: 'domain_match',
+        clientName: path.basename(suggestion.folder_path),
+        folderPath: suggestion.folder_path,
+        confidence: 'medium',
+        reason: `Même domaine que ${suggestion.sender_name}`
+      };
+    }
+    
+    // Try to match by company name in sender name
+    const senderWords = senderName.toLowerCase().split(/\s+/);
+    const companyKeywords = senderWords.filter(word => 
+      word.length > 3 && !['from', 'email', 'mail', 'contact', 'info', 'support'].includes(word)
+    );
+    
+    for (const keyword of companyKeywords) {
+      const nameMatch = Object.values(paths).find(p => 
+        path.basename(p.folder_path).toLowerCase().includes(keyword) ||
+        p.sender_name.toLowerCase().includes(keyword)
+      );
+      
+      if (nameMatch) {
+        return {
+          type: 'name_match',
+          clientName: path.basename(nameMatch.folder_path),
+          folderPath: nameMatch.folder_path,
+          confidence: 'medium',
+          reason: `Correspondance avec "${keyword}"`
+        };
+      }
+    }
+    
+    // Suggest creating new client based on sender name
+    if (settings.rootFolder && senderName) {
+      const cleanName = senderName.replace(/[<>:"/\\|?*]/g, '_');
+      const suggestedPath = path.join(settings.rootFolder, cleanName);
+      
+      return {
+        type: 'new_client',
+        clientName: cleanName,
+        folderPath: suggestedPath,
+        confidence: 'low',
+        reason: 'Nouveau client suggéré basé sur le nom de l\'expéditeur'
+      };
+    }
+    
+    return {
+      type: 'no_suggestion',
+      clientName: null,
+      folderPath: null,
+      confidence: 'none',
+      reason: 'Aucune suggestion disponible'
+    };
+    
+  } catch (error) {
+    console.error('Error suggesting client:', error);
+    return {
+      type: 'error',
+      clientName: null,
+      folderPath: null,
+      confidence: 'none',
+      reason: 'Erreur lors de la suggestion'
+    };
+  }
+}
+
+// Enhanced save message handler with suggestions
+ipcMain.handle('save-message-with-suggestion', async (event, { message }) => {
+  try {
+    const senderEmail = message.from?.emailAddress?.address;
+    const senderName = message.from?.emailAddress?.name;
+    
+    if (!senderEmail || !senderName) {
+      return { 
+        success: false, 
+        error: 'Informations expéditeur manquantes' 
+      };
+    }
+    
+    // Get suggestion for this email
+    const suggestion = suggestClientForEmail(senderEmail, senderName);
+    
+    // Get all existing clients for alternative options - MODIFIÉ POUR AFFICHER PAR EMAIL
+    const allPaths = loadSenderPaths();
+    const existingClients = Object.values(allPaths).map(p => ({
+      clientName: path.basename(p.folder_path),
+      folderPath: p.folder_path,
+      senderName: p.sender_name,
+      senderEmail: p.sender_email
+    }));
+    
+    // Trier par nom d'expéditeur au lieu de supprimer les doublons par folderPath
+    const sortedClients = existingClients.sort((a, b) => {
+      // Trier d'abord par nom d'expéditeur, puis par email
+      const nameComparison = a.senderName.localeCompare(b.senderName);
+      if (nameComparison !== 0) return nameComparison;
+      return a.senderEmail.localeCompare(b.senderEmail);
+    });
+    
+    return {
+      success: true,
+      suggestion,
+      existingClients: sortedClients, // Garder tous les clients, même avec le même chemin
+      senderEmail,
+      senderName
+    };
+    
+  } catch (error) {
+    console.error('Error getting save suggestion:', error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+});
+
+// Enhanced save message handler with chosen path - VERSION AVEC VÉRIFICATION DOSSIER DÉPÔT
+ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, savePathForFuture = false, isClientSelection = false, clientInfo = null }) => {
+  console.log('🔄 save-message-to-path avec vérification dossier dépôt:', {
+    chosenPath,
+    savePathForFuture,
+    isClientSelection,
+    clientInfo: clientInfo?.clientName,
+    subject: message?.subject,
+    senderEmail: message?.from?.emailAddress?.address
+  });
+
+  try {
+    const senderEmail = message.from?.emailAddress?.address;
+    const senderName = message.from?.emailAddress?.name;
+    
+    if (!chosenPath) {
+      console.error('❌ Aucun chemin fourni');
+      return { success: false, error: 'Aucun chemin sélectionné' };
+    }
+
+    if (!message) {
+      console.error('❌ Aucun message fourni');
+      return { success: false, error: 'Aucun message à sauvegarder' };
+    }
+    
+    // Get general settings to check for email deposit folder
+    const settings = loadGeneralSettings();
+    console.log('📁 Paramètres généraux:', settings);
+    
+    let finalPath = chosenPath;
+    let depositFolderUsed = false;
+    
+    // Vérifier si un dossier de dépôt est configuré
+    if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
+      const depositFolderName = settings.emailDepositFolder.trim();
+      const depositFolderPath = path.join(chosenPath, depositFolderName);
+      
+      console.log('🔍 Vérification du dossier de dépôt:', depositFolderName);
+      console.log('📂 Chemin complet du dossier de dépôt:', depositFolderPath);
+      
+      // Vérifier si le dossier de dépôt existe dans le chemin choisi
+      if (fs.existsSync(depositFolderPath)) {
+        console.log('✅ Dossier de dépôt trouvé, utilisation du chemin avec dossier de dépôt');
+        finalPath = depositFolderPath;
+        depositFolderUsed = true;
+      } else {
+        console.log('❌ Dossier de dépôt non trouvé, sauvegarde directe dans le chemin choisi');
+        finalPath = chosenPath;
+        depositFolderUsed = false;
+      }
+    } else {
+      console.log('📂 Aucun dossier de dépôt configuré, sauvegarde directe');
+    }
+    
+    console.log('📂 Chemin final de sauvegarde:', finalPath);
+    console.log('📂 Chemin de base choisi:', chosenPath);
+    console.log('📂 Dossier de dépôt utilisé:', depositFolderUsed);
+    
+    // Create filename
+    const date = new Date(message.receivedDateTime);
+    const dateStr = date.toISOString().split('T')[0];
+    const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-');
+    const subject = (message.subject || 'Sans_sujet').replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
+    const fileName = `${dateStr}_${timeStr}_${subject}.json`;
+    
+    const filePath = path.join(finalPath, fileName);
+    console.log('📄 Fichier à créer:', filePath);
+    
+    // Ensure directory exists
+    if (!fs.existsSync(finalPath)) {
+      console.log('📁 Création du dossier:', finalPath);
+      fs.mkdirSync(finalPath, { recursive: true });
+    }
+    
+    // Save file with detailed logging
+    console.log('💾 Écriture du fichier...');
+    const messageContent = JSON.stringify(message, null, 2);
+    fs.writeFileSync(filePath, messageContent, 'utf8');
+    
+    // Verify file was created
+    if (fs.existsSync(filePath)) {
+      const stats = fs.statSync(filePath);
+      console.log('✅ Fichier créé avec succès:', {
+        path: filePath,
+        size: stats.size,
+        created: stats.birthtime
+      });
+    } else {
+      throw new Error('Le fichier n\'a pas été créé');
+    }
+    
+    // Save path for future use if requested
+    if (savePathForFuture && senderEmail) {
+      console.log('💾 Sauvegarde/Mise à jour du chemin pour le futur:', senderEmail);
+      const paths = loadSenderPaths();
+      const now = new Date().toISOString();
+      
+      paths[senderEmail] = {
+        sender_email: senderEmail,
+        sender_name: senderName,
+        folder_path: chosenPath, // Toujours sauvegarder le chemin de base (sans le dossier de dépôt)
+        created_at: paths[senderEmail]?.created_at || now,
+        updated_at: now
+      };
+      
+      saveSenderPaths(paths);
+      console.log('✅ Chemin sauvegardé pour:', senderEmail, 'vers:', chosenPath);
+    }
+    
+    const result = { 
+      success: true, 
+      filePath: filePath,
+      fileName: fileName,
+      senderEmail: senderEmail,
+      senderName: senderName,
+      depositFolder: settings.emailDepositFolder || null,
+      depositFolderUsed: depositFolderUsed,
+      pathSaved: savePathForFuture,
+      isClientSelection: isClientSelection,
+      clientName: clientInfo?.clientName || null,
+      actualSavePath: finalPath, // Le chemin complet où le fichier a été sauvé
+      basePath: chosenPath // Le chemin de base choisi par l'utilisateur
+    };
+    
+    console.log('✅ Résultat complet de la sauvegarde:', result);
+    return result;
+    
+  } catch (error) {
+    console.error('❌ Erreur lors de la sauvegarde dans save-message-to-path:', error);
+    console.error('Stack trace:', error.stack);
+    return { success: false, error: error.message };
+  }
+});
+
+// Utility handlers
+ipcMain.handle('app:open-external', async (event, url) => {
+  try {
+    console.log('🌐 Ouverture d\'un lien externe via IPC:', url);
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error) {
+    console.error('Erreur lors de l\'ouverture du lien externe:', error);
+    return { success: false, error: error.message };
   }
 });

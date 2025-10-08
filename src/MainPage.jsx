@@ -22,6 +22,8 @@ import SenderPathsManager from './SenderPathsManager';
 import GeneralSettings from './GeneralSettings';
 import useNotifications from './useNotifications';
 import ToastContainer from './ToastContainer';
+import SaveEmailModal from './components/SaveEmailModal';
+import ExternalLink from './components/ExternalLink';
 
 const MainPage = ({ user, onLogout, onShowPricing }) => {
   const [deviceInfo, setDeviceInfo] = useState(null);
@@ -35,6 +37,8 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   const [currentSender, setCurrentSender] = useState(null);
   const [showPathsManager, setShowPathsManager] = useState(false);
   const [showGeneralSettings, setShowGeneralSettings] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [selectedMessageToSave, setSelectedMessageToSave] = useState(null);
   
   // Ajouter les états manquants
   const [senderPaths, setSenderPaths] = useState({});
@@ -512,9 +516,12 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                   Visitez le lien suivant et entrez le code :
                 </p>
                 <div className="bg-white rounded-lg p-4 mb-4">
-                  <p className="font-mono text-sm text-gray-600 break-all mb-2">
+                  <ExternalLink 
+                    href={deviceInfo.verification_uri}
+                    className="font-mono text-sm text-gray-600 break-all mb-2 block"
+                  >
                     {deviceInfo.verification_uri}
-                  </p>
+                  </ExternalLink>
                   <p className="font-mono text-xl font-bold text-blue-600">
                     {deviceInfo.user_code}
                   </p>
@@ -569,6 +576,72 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
       </>
     );
   }
+
+  const handleSaveMessage = (message) => {
+    setSelectedMessageToSave(message);
+    setSaveModalOpen(true);
+  };
+
+  const handleSaveComplete = (result) => {
+    console.log('🎉 handleSaveComplete avec vérification dossier dépôt:', result);
+    
+    if (result.success) {
+      let details = `Fichier: ${result.fileName || 'Nom non défini'}`;
+      
+      // Afficher les détails selon le type de sauvegarde
+      if (result.isClientSelection && result.clientName) {
+        details += `\nClient: ${result.clientName}`;
+      }
+      
+      details += `\nEmplacement: ${result.actualSavePath || 'Chemin non défini'}`;
+      
+      // Informer sur l'utilisation du dossier de dépôt
+      if (result.depositFolder) {
+        if (result.depositFolderUsed) {
+          details += `\n📁 Dossier de dépôt "${result.depositFolder}" utilisé`;
+        } else {
+          details += `\n📂 Dossier de dépôt "${result.depositFolder}" non trouvé, sauvegarde directe`;
+        }
+      }
+      
+      success('Message sauvegardé avec succès', {
+        title: 'Sauvegarde terminée',
+        details
+      });
+      
+      // Si le chemin a été sauvegardé/mis à jour pour le futur
+      if (result.pathSaved) {
+        const senderEmail = result.senderEmail || 'Expéditeur inconnu';
+        const basePath = result.basePath || 'Chemin non défini';
+        
+        if (result.pathChanged) {
+          info('Chemin mis à jour pour cet expéditeur', {
+            title: 'Configuration modifiée',
+            details: `L'expéditeur ${senderEmail} utilisera maintenant :\n${basePath}`
+          });
+        } else {
+          info('Chemin mémorisé pour cet expéditeur', {
+            title: 'Configuration mise à jour',
+            details: `L'expéditeur ${senderEmail} est maintenant configuré :\n${basePath}`
+          });
+        }
+      }
+      
+      // Recharger les chemins d'expéditeurs pour mettre à jour l'interface
+      loadSenderPaths();
+    } else {
+      error('Erreur lors de la sauvegarde', {
+        title: 'Erreur',
+        details: result.error || 'Erreur inconnue'
+      });
+    }
+    setSaveModalOpen(false);
+    setSelectedMessageToSave(null);
+  };
+  const handleCloseSaveModal = () => {
+    setSaveModalOpen(false);
+    setSelectedMessageToSave(null);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-25 via-white to-blue-25">
@@ -831,7 +904,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                       </div>
                       <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
                         <button 
-                          onClick={() => saveMessage(selectedMessage)}
+                          onClick={() => handleSaveMessage(selectedMessage)}
                           className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                           title="Sauvegarder le message"
                         >
@@ -860,7 +933,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                   {/* Contenu du message */}
                   <div className="flex-1 p-6 overflow-y-auto">
                     <div 
-                      className="prose prose-sm max-w-none text-gray-900 break-words"
+                      className="prose prose-sm max-w-none text-gray-900 break-words message-content"
                       dangerouslySetInnerHTML={{ 
                         __html: selectedMessage.body?.content || selectedMessage.bodyPreview 
                       }}
@@ -900,6 +973,14 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
             error(message, options);
           }
         }}
+      />
+
+      {/* Modal de sauvegarde */}
+      <SaveEmailModal
+        isOpen={saveModalOpen}
+        onClose={handleCloseSaveModal}
+        message={selectedMessageToSave}
+        onSave={handleSaveComplete}
       />
 
       {/* Toast Notifications */}

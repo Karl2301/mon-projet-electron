@@ -7,7 +7,7 @@ const ToastContainer = ({ notifications, onRemove }) => {
     return null;
   }
 
-  // Filtrer les notifications valides
+  // Filtrer les notifications valides et sécuriser les liens
   const validNotifications = notifications.filter(notification => {
     return (
       notification && 
@@ -16,6 +16,14 @@ const ToastContainer = ({ notifications, onRemove }) => {
       notification.message !== '' && // Message non vide
       notification.title !== '' // Titre non vide
     );
+  }).map(notification => {
+    // Sécuriser le contenu des notifications contre les liens non sécurisés
+    const secureNotification = { ...notification };
+    
+    // Si le message contient des liens, on pourrait les remplacer ici
+    // Pour l'instant, on garde le contenu tel quel
+    
+    return secureNotification;
   });
 
   // Si aucune notification valide, ne rien afficher
