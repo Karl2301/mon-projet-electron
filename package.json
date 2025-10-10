@@ -27,6 +27,7 @@
         "name": "Mon Projet Electron",
         "executableName": "mon-projet-electron",
         "icon": "./assets/icon",
+        "asar": true,
         "extraResource": [
           "./src/oauth.config.json"
         ],
@@ -110,19 +111,19 @@
             "build": [
               {
                 "entry": "src/main.js",
-                "config": "vite.main.config.js",
+                "config": "vite.main.config.mjs",
                 "target": "main"
               },
               {
                 "entry": "src/preload.js",
-                "config": "vite.preload.config.js",
+                "config": "vite.preload.config.mjs",
                 "target": "preload"
               }
             ],
             "renderer": [
               {
                 "name": "main_window",
-                "config": "vite.renderer.config.js"
+                "config": "vite.renderer.config.mjs"
               }
             ]
           }

@@ -54,35 +54,56 @@ function loadOAuthConfig() {
     let configPath;
     
     if (process.env.NODE_ENV === 'development') {
-      // En développement, chercher dans src/
-      configPath = path.join(__dirname, 'oauth.config.json');
+      // En développement, chercher dans src/ d'abord, puis à la racine
+      const srcPath = path.join(__dirname, 'oauth.config.json');
+      const rootPath = path.join(__dirname, '..', 'oauth.config.json');
+      
+      if (fs.existsSync(srcPath)) {
+        configPath = srcPath;
+      } else if (fs.existsSync(rootPath)) {
+        configPath = rootPath;
+      } else {
+        throw new Error(`Fichier oauth.config.json non trouvé`);
+      }
     } else {
       // En production (build), chercher dans le même répertoire que main.js
       configPath = path.join(__dirname, 'oauth.config.json');
-    }
-    
-    console.log('Tentative de chargement OAuth config depuis:', configPath);
-    
-    if (!fs.existsSync(configPath)) {
-      // Fallback: essayer à la racine du projet
-      const fallbackPath = path.join(__dirname, '..', '..', 'oauth.config.json');
-      if (fs.existsSync(fallbackPath)) {
-        configPath = fallbackPath;
-        console.log('Fichier trouvé via fallback:', configPath);
-      } else {
-        throw new Error(`Fichier oauth.config.json non trouvé à: ${configPath}`);
+      
+      if (!fs.existsSync(configPath)) {
+        // Fallback: essayer à la racine du projet
+        const fallbackPath = path.join(__dirname, '..', '..', 'oauth.config.json');
+        if (fs.existsSync(fallbackPath)) {
+          configPath = fallbackPath;
+        } else {
+          throw new Error(`Fichier oauth.config.json non trouvé à: ${configPath}`);
+        }
       }
     }
+    
+    console.log('Chargement OAuth config depuis:', configPath);
     
     const configData = fs.readFileSync(configPath, 'utf8');
     const config = JSON.parse(configData);
     
-    if (!config.clientId) {
-      throw new Error('clientId manquant dans oauth.config.json');
+    // Vérifier la structure de la configuration et adapter si nécessaire
+    if (config.clientId && !config.microsoft) {
+      // Ancienne structure - créer une structure compatible
+      console.log('⚠️ Ancienne structure OAuth détectée, adaptation en cours...');
+      return {
+        microsoft: {
+          clientId: config.clientId,
+          tenant: config.tenant || 'common',
+          scopes: config.scopes || 'offline_access Mail.Read'
+        }
+      };
+    } else if (config.microsoft && config.microsoft.clientId) {
+      // Nouvelle structure avec providers séparés
+      console.log('✅ Configuration OAuth avec providers séparés chargée');
+      return config;
+    } else {
+      throw new Error('Structure de configuration OAuth invalide');
     }
     
-    console.log('✅ Configuration OAuth chargée avec succès');
-    return config;
   } catch (error) {
     console.error('❌ Erreur lors du chargement de oauth.config.json:', error);
     throw error;
@@ -505,17 +526,41 @@ ipcMain.handle('dialog:select-folder-with-create', async (event) => {
   return result.filePaths[0];
 });
 
-// Authentication handlers - UNIFIED
+// Authentication handlers - AJOUTER CES HANDLERS MANQUANTS
+ipcMain.handle('auth:load-tokens', async () => {
+  try {
+    const tokens = loadTokens();
+    return tokens;
+  } catch (error) {
+    console.error('Error loading tokens:', error);
+    return null;
+  }
+});
+
+ipcMain.handle('auth:delete-tokens', async () => {
+  try {
+    if (fs.existsSync(TOKEN_STORE_PATH)) {
+      fs.unlinkSync(TOKEN_STORE_PATH);
+    }
+    tokenStore = null;
+    return { success: true };
+  } catch (error) {
+    console.error('Error deleting tokens:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Authentication handlers - CORRECTIONS DES CHEMINS
 ipcMain.handle('auth:start-device-flow', async () => {
   const cfg = loadOAuthConfig();
-  if (!cfg || !cfg.clientId) {
-    throw new Error('Missing oauth.config.json with clientId');
+  if (!cfg || !cfg.microsoft || !cfg.microsoft.clientId) {
+    throw new Error('Missing Microsoft configuration in oauth.config.json');
   }
 
-  const tenant = cfg.tenant || 'common';
+  const tenant = cfg.microsoft.tenant || 'common';
   const params = new URLSearchParams();
-  params.append('client_id', cfg.clientId);
-  params.append('scope', cfg.scopes || 'offline_access Mail.Read');
+  params.append('client_id', cfg.microsoft.clientId);
+  params.append('scope', cfg.microsoft.scopes || 'offline_access Mail.Read');
 
   const res = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/devicecode`, {
     method: 'POST',
@@ -532,13 +577,13 @@ ipcMain.handle('auth:start-device-flow', async () => {
 
 ipcMain.handle('auth:poll-token', async (event, data) => {
   const cfg = loadOAuthConfig();
-  if (!cfg || !cfg.clientId) {
-    throw new Error('Missing oauth.config.json with clientId');
+  if (!cfg || !cfg.microsoft || !cfg.microsoft.clientId) {
+    throw new Error('Missing Microsoft configuration in oauth.config.json');
   }
 
   const params = new URLSearchParams();
   params.append('grant_type', 'urn:ietf:params:oauth:grant-type:device_code');
-  params.append('client_id', cfg.clientId);
+  params.append('client_id', cfg.microsoft.clientId);
   params.append('device_code', data.device_code);
 
   const res = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
@@ -550,6 +595,8 @@ ipcMain.handle('auth:poll-token', async (event, data) => {
   if (responseData.error) {
     return { ok: false, data: responseData };
   }
+  // Marquer comme provider Microsoft
+  responseData.provider = 'microsoft';
   tokenStore = responseData;
   saveTokens(responseData);
   return { ok: true, data: responseData };
@@ -557,37 +604,110 @@ ipcMain.handle('auth:poll-token', async (event, data) => {
 
 ipcMain.handle('auth:refresh-token', async (event, refreshToken) => {
   const cfg = loadOAuthConfig();
+  if (!cfg || !cfg.microsoft || !cfg.microsoft.clientId) {
+    throw new Error('Missing Microsoft configuration in oauth.config.json');
+  }
+  
   const params = new URLSearchParams();
-  params.append('client_id', cfg.clientId);
+  params.append('client_id', cfg.microsoft.clientId);
   params.append('grant_type', 'refresh_token');
   params.append('refresh_token', refreshToken);
-  params.append('scope', cfg.scopes || 'offline_access Mail.Read');
-  const res = await fetch(`https://login.microsoftonline.com/${cfg.tenant || 'common'}/oauth2/v2.0/token`, {
+  params.append('scope', cfg.microsoft.scopes || 'offline_access Mail.Read');
+  
+  const res = await fetch(`https://login.microsoftonline.com/${cfg.microsoft.tenant || 'common'}/oauth2/v2.0/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString(),
   });
-  if (!res.ok) throw new Error('Refresh token failed');
+  
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error('Refresh token failed: ' + txt);
+  }
+  
   const data = await res.json();
+  data.provider = 'microsoft';
   saveTokens(data);
   return data;
 });
 
-ipcMain.handle('auth:load-tokens', async () => {
-  return loadTokens();
+// Google OAuth handlers - CORRECTIONS DES CHEMINS
+ipcMain.handle('auth:start-google-flow', async () => {
+  const cfg = loadOAuthConfig();
+  if (!cfg.google || !cfg.google.clientId) {
+    throw new Error('Missing Google configuration in oauth.config.json');
+  }
+
+  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+    `client_id=${cfg.google.clientId}&` +
+    `redirect_uri=${encodeURIComponent(cfg.google.redirectUri)}&` +
+    `response_type=code&` +
+    `scope=${encodeURIComponent(cfg.google.scopes)}&` +
+    `access_type=offline&` +
+    `prompt=consent`;
+
+  shell.openExternal(authUrl);
+  return { authUrl };
 });
 
-ipcMain.handle('auth:delete-tokens', async () => {
-  try {
-    if (fs.existsSync(TOKEN_STORE_PATH)) {
-      fs.unlinkSync(TOKEN_STORE_PATH);
-    }
-    tokenStore = null;
-    return { success: true };
-  } catch (error) {
-    console.error('Erreur lors de la suppression des tokens :', error);
-    return { success: false, error: error.message };
+ipcMain.handle('auth:exchange-google-code', async (event, code) => {
+  const cfg = loadOAuthConfig();
+  if (!cfg.google || !cfg.google.clientId) {
+    throw new Error('Missing Google configuration in oauth.config.json');
   }
+  
+  const params = new URLSearchParams();
+  params.append('client_id', cfg.google.clientId);
+  params.append('client_secret', cfg.google.clientSecret);
+  params.append('code', code);
+  params.append('grant_type', 'authorization_code');
+  params.append('redirect_uri', cfg.google.redirectUri);
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error('Google token exchange failed: ' + txt);
+  }
+
+  const data = await res.json();
+  data.provider = 'google';
+  tokenStore = data;
+  saveTokens(data);
+  return data;
+});
+
+ipcMain.handle('auth:refresh-google-token', async (event, refreshToken) => {
+  const cfg = loadOAuthConfig();
+  if (!cfg.google || !cfg.google.clientId) {
+    throw new Error('Missing Google configuration in oauth.config.json');
+  }
+  
+  const params = new URLSearchParams();
+  params.append('client_id', cfg.google.clientId);
+  params.append('client_secret', cfg.google.clientSecret);
+  params.append('grant_type', 'refresh_token');
+  params.append('refresh_token', refreshToken);
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error('Google refresh token failed: ' + txt);
+  }
+  
+  const data = await res.json();
+  data.provider = 'google';
+  saveTokens(data);
+  return data;
 });
 
 // Messages handlers
