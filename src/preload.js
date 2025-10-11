@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Messages
   getMessages: (params) => ipcRenderer.invoke('outlook:get-messages', params),
+  getSentMessages: (params) => ipcRenderer.invoke('outlook:get-sent-messages', params),
+  getSentMessagesWithPagination: (params) => ipcRenderer.invoke('outlook:get-sent-messages-paginated', params),
   saveMessage: (data) => ipcRenderer.invoke('save-message', data),
   
   // Sender paths
@@ -52,6 +54,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Enhanced save message operations with suggestions
   saveMessageWithSuggestion: (data) => ipcRenderer.invoke('save-message-with-suggestion', data),
   saveMessageToPath: (data) => ipcRenderer.invoke('save-message-to-path', data),
+  saveSentMessageWithSuggestion: (data) => ipcRenderer.invoke('save-sent-message-with-suggestion', data),
+  saveSentMessageToPath: (data) => ipcRenderer.invoke('save-sent-message-to-path', data),
   
   // Utility functions
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),

@@ -4,7 +4,8 @@ const SaveEmailModal = ({
   isOpen, 
   onClose, 
   message, 
-  onSave 
+  onSave,
+  messageType = 'received' // 'received' ou 'sent'
 }) => {
   const [suggestion, setSuggestion] = useState(null);
   const [existingClients, setExistingClients] = useState([]);
@@ -25,7 +26,7 @@ const SaveEmailModal = ({
       loadSuggestion();
       resetStates();
     }
-  }, [isOpen, message]);
+  }, [isOpen, message, messageType]);
 
   const resetStates = () => {
     setSelectedClient(null);
@@ -37,27 +38,33 @@ const SaveEmailModal = ({
   const loadSuggestion = async () => {
     setIsLoading(true);
     try {
-      // Charger les paramètres généraux pour connaître le dossier de dépôt
       const settings = await window.electronAPI?.getGeneralSettings();
       setGeneralSettings(settings);
       
-      const result = await window.electronAPI?.saveMessageWithSuggestion({ message });
+      let result;
+      if (messageType === 'sent') {
+        result = await window.electronAPI?.saveSentMessageWithSuggestion({ message });
+      } else {
+        result = await window.electronAPI?.saveMessageWithSuggestion({ message });
+      }
+      
       if (result?.success) {
         setSuggestion(result.suggestion);
         setExistingClients(result.existingClients);
         
-        // Charger le chemin original de l'expéditeur si il existe
-        const senderEmail = message?.from?.emailAddress?.address;
-        if (senderEmail) {
-          const originalPath = await window.electronAPI?.getSenderPath(senderEmail);
+        // Pour les messages envoyés, utiliser l'email du destinataire
+        const emailToCheck = messageType === 'sent' 
+          ? result.recipientEmail 
+          : message?.from?.emailAddress?.address;
+          
+        if (emailToCheck) {
+          const originalPath = await window.electronAPI?.getSenderPath(emailToCheck);
           setOriginalSenderPath(originalPath);
         }
         
-        // Pre-select the suggestion if it's good
         if (result.suggestion?.folderPath && result.suggestion.confidence !== 'none') {
           setSelectedPath(result.suggestion.folderPath);
           
-          // Si c'est un expéditeur existant, on ne propose pas de sauvegarder pour le futur par défaut
           if (result.suggestion.type === 'existing') {
             setSaveForFuture(false);
           }
@@ -155,15 +162,20 @@ const SaveEmailModal = ({
     
     setIsLoading(true);
     try {
-      const result = await window.electronAPI?.saveMessageToPath({
+      let result;
+      const saveData = {
         message,
         chosenPath: pathToUse,
         savePathForFuture: shouldSaveForFuture,
         isClientSelection: activeTab === 'existing',
         clientInfo: selectedClient
-      });
+      };
       
-      console.log('📄 Résultat de la sauvegarde:', result);
+      if (messageType === 'sent') {
+        result = await window.electronAPI?.saveSentMessageToPath(saveData);
+      } else {
+        result = await window.electronAPI?.saveMessageToPath(saveData);
+      }
       
       if (result?.success) {
         // Enrichir le résultat avec les informations locales
@@ -224,21 +236,51 @@ const SaveEmailModal = ({
     }
   };
 
+  const getModalTitle = () => {
+    return messageType === 'sent' ? 'Sauvegarder l\'email envoyé' : 'Sauvegarder l\'email reçu';
+  };
+
+  const getEmailInfo = () => {
+    if (messageType === 'sent') {
+      const recipient = message?.toRecipients?.[0];
+      return {
+        label: 'À',
+        name: recipient?.emailAddress?.name,
+        email: recipient?.emailAddress?.address
+      };
+    } else {
+      return {
+        label: 'De',
+        name: message?.from?.emailAddress?.name,
+        email: message?.from?.emailAddress?.address
+      };
+    }
+  };
+
   if (!isOpen) return null;
+
+  const emailInfo = getEmailInfo();
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900">
-            Sauvegarder l'email
+            {getModalTitle()}
           </h2>
-          <p className="text-sm text-gray-600 mt-1">
-            De: {message?.from?.emailAddress?.name} ({message?.from?.emailAddress?.address})
-          </p>
-          <p className="text-sm text-gray-600">
-            Sujet: {message?.subject || 'Sans sujet'}
-          </p>
+          <div className="mt-2">
+            {messageType === 'sent' && (
+              <div className="inline-block px-2 py-1 bg-blue-100 text-blue-800 rounded-md text-xs font-medium mb-2">
+                Message envoyé
+              </div>
+            )}
+            <p className="text-sm text-gray-600">
+              {emailInfo.label}: {emailInfo.name} ({emailInfo.email})
+            </p>
+            <p className="text-sm text-gray-600">
+              Sujet: {message?.subject || 'Sans sujet'}
+            </p>
+          </div>
         </div>
 
         <div className="p-6">

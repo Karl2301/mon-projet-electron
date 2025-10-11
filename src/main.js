@@ -1537,6 +1537,226 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
   }
 });
 
+// Messages handlers - AJOUTER SUPPORT POUR LES EMAILS ENVOYÉS
+ipcMain.handle('outlook:get-sent-messages', async (event, { accessToken, top = 25, filter = null }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) throw new Error('No access token available');
+
+  let url = `https://graph.microsoft.com/v1.0/me/mailFolders/SentItems/messages?$top=${top}`;
+  if (filter) {
+    url += `&$filter=${encodeURIComponent(filter)}`;
+  }
+  // Ajouter l'orderby pour avoir les emails les plus récents en premier
+  url += '&$orderby=sentDateTime desc';
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error('Graph request failed: ' + txt);
+  }
+  const data = await res.json();
+  
+  // Clean the messages before returning them
+  if (data.value) {
+    data.value = cleanMessages(data.value);
+  }
+  
+  return data;
+});
+
+// Enhanced sent messages handler with pagination
+ipcMain.handle('outlook:get-sent-messages-paginated', async (event, { accessToken, top = 25, skip = 0, nextUrl = null, filter = null }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) throw new Error('No access token available');
+
+  try {
+    let url;
+    
+    if (nextUrl) {
+      url = nextUrl;
+    } else {
+      url = `https://graph.microsoft.com/v1.0/me/mailFolders/SentItems/messages?$top=${top}&$skip=${skip}`;
+      if (filter) {
+        url += `&$filter=${encodeURIComponent(filter)}`;
+      }
+      url += '&$orderby=sentDateTime desc';
+    }
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error('Graph request failed: ' + txt);
+    }
+    
+    const data = await res.json();
+    
+    if (data.value) {
+      data.value = cleanMessages(data.value);
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error fetching paginated sent messages:', error);
+    throw error;
+  }
+});
+
+// Enhanced save sent message handler - BASÉ SUR LE DESTINATAIRE
+ipcMain.handle('save-sent-message-with-suggestion', async (event, { message }) => {
+  try {
+    // Pour les emails envoyés, on utilise le premier destinataire comme référence
+    const recipientEmail = message.toRecipients?.[0]?.emailAddress?.address;
+    const recipientName = message.toRecipients?.[0]?.emailAddress?.name;
+    
+    if (!recipientEmail || !recipientName) {
+      return { 
+        success: false, 
+        error: 'Informations destinataire manquantes' 
+      };
+    }
+    
+    // Get suggestion for this recipient email (même logique que pour les expéditeurs)
+    const suggestion = suggestClientForEmail(recipientEmail, recipientName);
+    
+    // Get all existing clients for alternative options
+    const allPaths = loadSenderPaths();
+    const existingClients = Object.values(allPaths).map(p => ({
+      clientName: path.basename(p.folder_path),
+      folderPath: p.folder_path,
+      senderName: p.sender_name,
+      senderEmail: p.sender_email
+    }));
+    
+    const sortedClients = existingClients.sort((a, b) => {
+      const nameComparison = a.senderName.localeCompare(b.senderName);
+      if (nameComparison !== 0) return nameComparison;
+      return a.senderEmail.localeCompare(b.senderEmail);
+    });
+    
+    return {
+      success: true,
+      suggestion,
+      existingClients: sortedClients,
+      recipientEmail,
+      recipientName,
+      messageType: 'sent' // Identifier le type de message
+    };
+    
+  } catch (error) {
+    console.error('Error getting sent message save suggestion:', error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+});
+
+// Enhanced save sent message to path
+ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath, savePathForFuture = false, isClientSelection = false, clientInfo = null }) => {
+  console.log('🔄 save-sent-message-to-path:', {
+    chosenPath,
+    savePathForFuture,
+    isClientSelection,
+    clientInfo: clientInfo?.clientName,
+    subject: message?.subject,
+    recipientEmail: message?.toRecipients?.[0]?.emailAddress?.address
+  });
+
+  try {
+    const recipientEmail = message.toRecipients?.[0]?.emailAddress?.address;
+    const recipientName = message.toRecipients?.[0]?.emailAddress?.name;
+    
+    if (!chosenPath) {
+      console.error('❌ Aucun chemin fourni');
+      return { success: false, error: 'Aucun chemin sélectionné' };
+    }
+
+    if (!message) {
+      console.error('❌ Aucun message fourni');
+      return { success: false, error: 'Aucun message à sauvegarder' };
+    }
+    
+    const settings = loadGeneralSettings();
+    let finalPath = chosenPath;
+    let depositFolderUsed = false;
+    
+    // Vérifier si un dossier de dépôt est configuré
+    if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
+      const depositFolderName = settings.emailDepositFolder.trim();
+      const depositFolderPath = path.join(chosenPath, depositFolderName);
+      
+      if (fs.existsSync(depositFolderPath)) {
+        finalPath = depositFolderPath;
+        depositFolderUsed = true;
+      } else {
+        finalPath = chosenPath;
+        depositFolderUsed = false;
+      }
+    }
+    
+    // Create filename with SENT prefix to distinguish
+    const date = new Date(message.sentDateTime);
+    const dateStr = date.toISOString().split('T')[0];
+    const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-');
+    const subject = (message.subject || 'Sans_sujet').replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
+    const fileName = `SENT_${dateStr}_${timeStr}_${subject}.json`;
+    
+    const filePath = path.join(finalPath, fileName);
+    
+    // Ensure directory exists
+    if (!fs.existsSync(finalPath)) {
+      fs.mkdirSync(finalPath, { recursive: true });
+    }
+    
+    // Save file
+    const messageContent = JSON.stringify(message, null, 2);
+    fs.writeFileSync(filePath, messageContent, 'utf8');
+    
+    // Save path for future use if requested (basé sur le destinataire)
+    if (savePathForFuture && recipientEmail) {
+      const paths = loadSenderPaths();
+      const now = new Date().toISOString();
+      
+      paths[recipientEmail] = {
+        sender_email: recipientEmail,
+        sender_name: recipientName,
+        folder_path: chosenPath,
+        created_at: paths[recipientEmail]?.created_at || now,
+        updated_at: now
+      };
+      
+      saveSenderPaths(paths);
+    }
+    
+    const result = { 
+      success: true, 
+      filePath: filePath,
+      fileName: fileName,
+      recipientEmail: recipientEmail,
+      recipientName: recipientName,
+      depositFolder: settings.emailDepositFolder || null,
+      depositFolderUsed: depositFolderUsed,
+      pathSaved: savePathForFuture,
+      isClientSelection: isClientSelection,
+      clientName: clientInfo?.clientName || null,
+      actualSavePath: finalPath,
+      basePath: chosenPath,
+      messageType: 'sent'
+    };
+    
+    return result;
+    
+  } catch (error) {
+    console.error('❌ Erreur lors de la sauvegarde du message envoyé:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // Utility handlers
 ipcMain.handle('app:open-external', async (event, url) => {
   try {

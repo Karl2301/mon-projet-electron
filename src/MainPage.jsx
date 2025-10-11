@@ -14,7 +14,9 @@ import {
   ReplyAll,
   Forward,
   FolderSpecial,
-  Refresh
+  Refresh,
+  Send, // NOUVEAU
+  Inbox // NOUVEAU
 } from '@mui/icons-material';
 import Navigation from './Navigation';
 import SenderPathModal from './SenderPathModal';
@@ -41,6 +43,9 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [selectedMessageToSave, setSelectedMessageToSave] = useState(null);
   const [showDaemonSettings, setShowDaemonSettings] = useState(false);
+  const [currentTab, setCurrentTab] = useState('received'); // 'received' ou 'sent'
+  const [sentMessages, setSentMessages] = useState([]);
+  const [loadingSent, setLoadingSent] = useState(false);
   
   // Ajouter les états manquants
   const [senderPaths, setSenderPaths] = useState({});
@@ -82,7 +87,6 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
     }
 
     try {
-      // Use provided tokens or current state tokens
       const currentTokens = providedTokens || tokens;
       let token = currentTokens?.access_token;
       
@@ -96,17 +100,29 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         throw new Error('Token d\'accès non disponible');
       }
       
-      const data = await window.electronAPI.getMessages({ 
-        accessToken: token, 
-        top: 50,
-        filter: "isRead eq false"
-      });
+      // Charger les messages reçus ET envoyés
+      const [receivedData, sentData] = await Promise.all([
+        window.electronAPI.getMessages({ 
+          accessToken: token, 
+          top: 50,
+          filter: "isRead eq false"
+        }),
+        window.electronAPI.getSentMessages({ 
+          accessToken: token, 
+          top: 50
+        })
+      ]);
       
-      setMessages(data.value || []);
+      setMessages(receivedData.value || []);
+      setSentMessages(sentData.value || []);
+      
+      const totalCount = (receivedData.value?.length || 0) + (sentData.value?.length || 0);
       
       return {
         success: true,
-        count: data.value?.length || 0
+        count: totalCount,
+        receivedCount: receivedData.value?.length || 0,
+        sentCount: sentData.value?.length || 0
       };
     } catch (loadError) {
       console.error('Error loading messages:', loadError);
@@ -493,6 +509,10 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
     }
   };
 
+  const getCurrentMessages = () => {
+    return currentTab === 'sent' ? sentMessages : messages;
+  };
+
   // Si pas de tokens, afficher l'interface d'authentification
   if (!tokens && !initialLoading) {
     return (
@@ -606,25 +626,26 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         }
       }
       
-      success('Message sauvegardé avec succès', {
+      const messageTypeText = result.messageType === 'sent' ? 'envoyé' : 'reçu';
+      success(`Message ${messageTypeText} sauvegardé avec succès`, {
         title: 'Sauvegarde terminée',
         details
       });
       
       // Si le chemin a été sauvegardé/mis à jour pour le futur
       if (result.pathSaved) {
-        const senderEmail = result.senderEmail || 'Expéditeur inconnu';
+        const emailAddress = result.messageType === 'sent' ? result.recipientEmail : result.senderEmail;
         const basePath = result.basePath || 'Chemin non défini';
         
         if (result.pathChanged) {
-          info('Chemin mis à jour pour cet expéditeur', {
+          info('Chemin mis à jour pour cette adresse', {
             title: 'Configuration modifiée',
-            details: `L'expéditeur ${senderEmail} utilisera maintenant :\n${basePath}`
+            details: `L'adresse ${emailAddress} utilisera maintenant :\n${basePath}`
           });
         } else {
-          info('Chemin mémorisé pour cet expéditeur', {
+          info('Chemin mémorisé pour cette adresse', {
             title: 'Configuration mise à jour',
-            details: `L'expéditeur ${senderEmail} est maintenant configuré :\n${basePath}`
+            details: `L'adresse ${emailAddress} est maintenant configurée :\n${basePath}`
           });
         }
       }
@@ -668,7 +689,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                   </button>
                 ) : (
                   <>
-                    Vos mails non-lus
+                    {currentTab === 'sent' ? 'Vos mails envoyés' : 'Vos mails non-lus'}
                     <span className="text-blue-600 font-medium"> avec sauvegarde automatique</span>
                   </>
                 )}
@@ -703,16 +724,16 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
           </div>
         </div>
 
-        {/* Stats - VERSION COMPACTE */}
+        {/* Stats - VERSION MISE À JOUR */}
         {tokens && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-white rounded-xl p-4 border border-gray-100">
               <div className="flex items-center">
                 <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center mr-3">
-                  <Email className="text-blue-600" style={{ fontSize: 18 }} />
+                  <Inbox className="text-blue-600" style={{ fontSize: 18 }} />
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-gray-600">Messages</p>
+                  <p className="text-xs font-medium text-gray-600">Messages reçus</p>
                   <p className="text-lg font-bold text-gray-900">{messages.length}</p>
                 </div>
               </div>
@@ -721,11 +742,11 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
             <div className="bg-white rounded-xl p-4 border border-gray-100">
               <div className="flex items-center">
                 <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center mr-3">
-                  <Person className="text-green-600" style={{ fontSize: 18 }} />
+                  <Send className="text-green-600" style={{ fontSize: 18 }} />
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-gray-600">Expéditeurs</p>
-                  <p className="text-lg font-bold text-gray-900">{Object.keys(senderPaths).length}</p>
+                  <p className="text-xs font-medium text-gray-600">Messages envoyés</p>
+                  <p className="text-lg font-bold text-gray-900">{sentMessages.length}</p>
                 </div>
               </div>
             </div>
@@ -756,10 +777,10 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
           </div>
         )}
 
-        {/* Interface Email - HAUTEUR MAXIMALE */}
+        {/* Interface Email */}
         {tokens && (
           <>
-            {/* Action buttons - VERSION COMPACTE */}
+            {/* Action buttons */}
             <div className="flex space-x-4 mb-6">
               <button
                 onClick={() => setShowPathsManager(true)}
@@ -787,7 +808,32 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
               </button>
             </div>
 
-            {/* HAUTEUR MAXIMALE POUR LES EMAILS */}
+            {/* Onglets pour choisir entre reçus et envoyés */}
+            <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
+              <button
+                onClick={() => setCurrentTab('received')}
+                className={`py-2 px-6 rounded-md text-sm font-medium transition-colors ${
+                  currentTab === 'received'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Inbox className="mr-2 inline" style={{ fontSize: 16 }} />
+                Messages reçus ({messages.length})
+              </button>
+              <button
+                onClick={() => setCurrentTab('sent')}
+                className={`py-2 px-6 rounded-md text-sm font-medium transition-colors ${
+                  currentTab === 'sent'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Send className="mr-2 inline" style={{ fontSize: 16 }} />
+                Messages envoyés ({sentMessages.length})
+              </button>
+            </div>
+
             <div className="flex gap-6 min-h-[calc(100vh-280px)]">
               {/* Liste des emails */}
               <div className={`bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm transition-all duration-300 ${
@@ -796,27 +842,43 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                 {/* Header de la liste */}
                 <div className="p-6 border-b border-gray-100">
                   <h3 className="text-xl font-semibold text-gray-900">
-                    Messages non-lus ({messages.length})
+                    {currentTab === 'sent' 
+                      ? `Messages envoyés (${sentMessages.length})` 
+                      : `Messages non-lus (${messages.length})`
+                    }
                   </h3>
                 </div>
 
-                {/* Liste des messages - SANS SCROLL, AFFICHAGE FIXE */}
+                {/* Liste des messages */}
                 <div className="divide-y divide-gray-100">
-                  {messages.length === 0 ? (
+                  {getCurrentMessages().length === 0 ? (
                     <div className="p-12 text-center">
-                      <Email className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
+                      {currentTab === 'sent' ? (
+                        <Send className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
+                      ) : (
+                        <Email className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
+                      )}
                       <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                        Aucun message non-lu
+                        {currentTab === 'sent' ? 'Aucun message envoyé' : 'Aucun message non-lu'}
                       </h3>
                       <p className="text-gray-600">
-                        Tous vos messages ont été lus
+                        {currentTab === 'sent' 
+                          ? 'Vos messages envoyés apparaîtront ici' 
+                          : 'Tous vos messages ont été lus'
+                        }
                       </p>
                     </div>
                   ) : (
                     <>
-                      {messages.map((message) => {
-                        const senderEmail = message.from?.emailAddress?.address;
-                        const senderPathInfo = getSenderPathInfo(senderEmail);
+                      {getCurrentMessages().map((message) => {
+                        // Pour les messages envoyés, utiliser le destinataire au lieu de l'expéditeur
+                        const contactEmail = currentTab === 'sent' 
+                          ? message.toRecipients?.[0]?.emailAddress?.address
+                          : message.from?.emailAddress?.address;
+                        const contactName = currentTab === 'sent'
+                          ? message.toRecipients?.[0]?.emailAddress?.name
+                          : message.from?.emailAddress?.name;
+                        const senderPathInfo = getSenderPathInfo(contactEmail);
                         
                         return (
                           <div 
@@ -829,9 +891,11 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                             <div className="flex items-start justify-between">
                               <div className="flex-1 min-w-0 pr-4">
                                 <div className="flex items-center mb-2">
-                                  <div className="w-2 h-2 bg-blue-500 rounded-full mr-3 flex-shrink-0"></div>
+                                  <div className={`w-2 h-2 rounded-full mr-3 flex-shrink-0 ${
+                                    currentTab === 'sent' ? 'bg-green-500' : 'bg-blue-500'
+                                  }`}></div>
                                   <p className="font-semibold text-gray-900 truncate flex-1">
-                                    {message.from?.emailAddress?.name || message.from?.emailAddress?.address}
+                                    {currentTab === 'sent' ? `À: ${contactName || contactEmail}` : contactName || contactEmail}
                                   </p>
                                   <div className="flex items-center ml-2 flex-shrink-0">
                                     {message.hasAttachments && (
@@ -851,7 +915,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                               </div>
                               <div className="ml-4 flex-shrink-0 text-right">
                                 <p className="text-xs text-gray-500 mb-1 whitespace-nowrap">
-                                  {formatDate(message.receivedDateTime)}
+                                  {formatDate(currentTab === 'sent' ? message.sentDateTime : message.receivedDateTime)}
                                 </p>
                                 {message.importance === 'high' && (
                                   <div className="w-2 h-2 bg-red-500 rounded-full ml-auto"></div>
@@ -866,42 +930,75 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                 </div>
               </div>
 
-              {/* Vue détaillée du message */}
+              {/* Vue détaillée du message - MISE À JOUR POUR LES ENVOYÉS */}
               {selectedMessage && (
                 <div className="w-2/3 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm flex flex-col">
                   {/* Header du message */}
                   <div className="p-6 border-b border-gray-100 flex-shrink-0">
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex-1 min-w-0 pr-4">
-                        <h2 className="text-xl font-bold text-gray-900 mb-2 break-words">
-                          {selectedMessage.subject || 'Sans sujet'}
-                        </h2>
-                        <div className="space-y-2">
-                          <div className="flex items-start">
-                            <span className="text-sm text-gray-500 w-16 flex-shrink-0">De:</span>
-                            <div className="flex-1 min-w-0">
-                              <span className="text-sm text-gray-900 font-medium break-words">
-                                {selectedMessage.from?.emailAddress?.name || selectedMessage.from?.emailAddress?.address}
-                              </span>
-                              {getSenderPathInfo(selectedMessage.from?.emailAddress?.address) && (
-                                <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
-                                  Dossier configuré
-                                </div>
-                              )}
+                        <div className="flex items-center mb-2">
+                          <h2 className="text-xl font-bold text-gray-900 break-words flex-1">
+                            {selectedMessage.subject || 'Sans sujet'}
+                          </h2>
+                          {currentTab === 'sent' && (
+                            <div className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-md flex-shrink-0">
+                              Message envoyé
                             </div>
-                          </div>
-                          <div className="flex items-start">
-                            <span className="text-sm text-gray-500 w-16 flex-shrink-0">À:</span>
-                            <span className="text-sm text-gray-900 break-words">
-                              {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
-                            </span>
-                          </div>
-                          <div className="flex items-start">
-                            <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
-                            <span className="text-sm text-gray-900">
-                              {new Date(selectedMessage.receivedDateTime).toLocaleString('fr-FR')}
-                            </span>
-                          </div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {currentTab === 'sent' ? (
+                            <>
+                              <div className="flex items-start">
+                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">À:</span>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm text-gray-900 font-medium break-words">
+                                    {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
+                                  </span>
+                                  {getSenderPathInfo(selectedMessage.toRecipients?.[0]?.emailAddress?.address) && (
+                                    <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
+                                      Dossier configuré
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-start">
+                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
+                                <span className="text-sm text-gray-900">
+                                  {new Date(selectedMessage.sentDateTime).toLocaleString('fr-FR')}
+                                </span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="flex items-start">
+                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">De:</span>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm text-gray-900 font-medium break-words">
+                                    {selectedMessage.from?.emailAddress?.name || selectedMessage.from?.emailAddress?.address}
+                                  </span>
+                                  {getSenderPathInfo(selectedMessage.from?.emailAddress?.address) && (
+                                    <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
+                                      Dossier configuré
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-start">
+                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">À:</span>
+                                <span className="text-sm text-gray-900 break-words">
+                                  {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
+                                </span>
+                              </div>
+                              <div className="flex items-start">
+                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
+                                <span className="text-sm text-gray-900">
+                                  {new Date(selectedMessage.receivedDateTime).toLocaleString('fr-FR')}
+                                </span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
@@ -914,7 +1011,6 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                         </button>
                       </div>
                     </div>
-                    
                   </div>
 
                   {/* Contenu du message */}
@@ -933,7 +1029,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         )}
       </div>
 
-      {/* Modals */}
+      {/* Modals - MISE À JOUR POUR SUPPORTER LE TYPE DE MESSAGE */}
       <SenderPathModal
         isOpen={showSenderModal}
         onClose={() => {
@@ -967,6 +1063,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         isOpen={saveModalOpen}
         onClose={handleCloseSaveModal}
         message={selectedMessageToSave}
+        messageType={currentTab} // Passer le type de message
         onSave={handleSaveComplete}
       />
 
