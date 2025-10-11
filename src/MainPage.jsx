@@ -767,13 +767,6 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                 Gérer les expéditeurs
               </button>
 
-              <button
-                onClick={() => setShowGeneralSettings(true)}
-                className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
-              >
-                <Folder className="mr-2" style={{ fontSize: 16 }} />
-                Configuration générale
-              </button>
               
               <button 
                 onClick={handleManualSync} // Utilisez handleManualSync au lieu de loadMessages
