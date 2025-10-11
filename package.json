@@ -48,11 +48,16 @@
             "setupExe": "MonProjetElectronSetup.exe",
             "setupIcon": "./assets/icon.ico"
           },
-          "platforms": ["win32"]
+          "platforms": [
+            "win32"
+          ]
         },
         {
           "name": "@electron-forge/maker-zip",
-          "platforms": ["darwin", "win32"]
+          "platforms": [
+            "darwin",
+            "win32"
+          ]
         },
         {
           "name": "@electron-forge/maker-deb",
@@ -61,16 +66,30 @@
             "productName": "Mon Projet Electron",
             "genericName": "Gestionnaire d'emails Outlook",
             "description": "Application de gestion et sauvegarde d'emails Outlook",
-            "categories": ["Office", "Email"],
+            "categories": [
+              "Office",
+              "Email"
+            ],
             "icon": "./assets/icon.png",
             "homepage": "https://github.com/karlrahuel/mon-projet-electron",
             "maintainer": "Karl Rahuel",
             "section": "utils",
             "priority": "optional",
-            "depends": ["gconf2", "gconf-service", "libnotify4", "libappindicator1", "libxtst6", "libnss3"],
-            "recommends": ["pulseaudio"]
+            "depends": [
+              "gconf2",
+              "gconf-service",
+              "libnotify4",
+              "libappindicator1",
+              "libxtst6",
+              "libnss3"
+            ],
+            "recommends": [
+              "pulseaudio"
+            ]
           },
-          "platforms": ["linux"]
+          "platforms": [
+            "linux"
+          ]
         },
         {
           "name": "@electron-forge/maker-rpm",
@@ -79,31 +98,31 @@
             "productName": "Mon Projet Electron",
             "genericName": "Gestionnaire d'emails Outlook",
             "description": "Application de gestion et sauvegarde d'emails Outlook",
-            "categories": ["Office", "Email"],
+            "categories": [
+              "Office",
+              "Email"
+            ],
             "icon": "./assets/icon.png",
             "homepage": "https://github.com/karlrahuel/mon-projet-electron",
             "license": "MIT",
-            "requires": ["gconf2", "libnotify", "libappindicator-gtk3", "libXtst", "nss"],
+            "requires": [
+              "gconf2",
+              "libnotify",
+              "libappindicator-gtk3",
+              "libXtst",
+              "nss"
+            ],
             "vendor": "Karl Rahuel"
           },
-          "platforms": ["linux"]
+          "platforms": [
+            "linux"
+          ]
         }
       ],
       "plugins": [
         {
           "name": "@electron-forge/plugin-auto-unpack-natives",
           "config": {}
-        },
-        {
-          "name": "@electron-forge/plugin-fuses",
-          "config": {
-            "version": "1.8.0",
-            "enableCookieEncryption": true,
-            "enableNodeOptionsEnvironmentVariable": false,
-            "enableNodeCliInspectArguments": false,
-            "enableEmbeddedAsarIntegrityValidation": true,
-            "onlyLoadAppFromAsar": true
-          }
         },
         {
           "name": "@electron-forge/plugin-vite",
@@ -151,11 +170,10 @@
     "@electron-forge/maker-squirrel": "^7.9.0",
     "@electron-forge/maker-zip": "^7.9.0",
     "@electron-forge/plugin-auto-unpack-natives": "^7.9.0",
-    "@electron-forge/plugin-fuses": "^7.9.0",
     "@electron-forge/plugin-vite": "^7.9.0",
     "@electron/fuses": "^1.8.0",
     "autoprefixer": "^10.4.21",
-    "electron": "38.2.1",
+    "electron": "^38.2.2",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18",
     "vite": "^5.4.20"

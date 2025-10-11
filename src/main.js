@@ -3,6 +3,18 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
+// Try to import EmailSyncDaemon, but handle gracefully if not available
+let EmailSyncDaemon = null;
+let emailDaemon = null;
+
+try {
+  // Adjust this path based on where your EmailSyncDaemon module is located
+  EmailSyncDaemon = require('./email-sync-daemon');
+} catch (error) {
+  console.warn('⚠️ EmailSyncDaemon non disponible:', error.message);
+  EmailSyncDaemon = null;
+}
+
 // Gestion conditionnelle de electron-squirrel-startup (Windows uniquement)
 if (process.platform === 'win32') {
   try {
@@ -473,15 +485,38 @@ const createWindow = () => {
     shell.openExternal(navigationUrl);
   });
 
-  // Load the app
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+  // Load the app with proper fallbacks for Vite constants
+  const isDev = process.env.NODE_ENV === 'development';
+  
+  if (isDev && typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined') {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
+    // In production, try multiple possible paths
+    const possiblePaths = [
+      path.join(__dirname, `../renderer/${process.env.MAIN_WINDOW_VITE_NAME || 'main_window'}/index.html`),
+      path.join(__dirname, '../renderer/main_window/index.html'),
+      path.join(__dirname, '../renderer/index.html'),
+      path.join(__dirname, 'index.html')
+    ];
+    
+    let loaded = false;
+    for (const htmlPath of possiblePaths) {
+      if (fs.existsSync(htmlPath)) {
+        console.log('Loading app from:', htmlPath);
+        mainWindow.loadFile(htmlPath);
+        loaded = true;
+        break;
+      }
+    }
+    
+    if (!loaded) {
+      console.error('❌ Could not find index.html file in any of the expected locations');
+      console.log('Tried paths:', possiblePaths);
+    }
   }
 
   // Open DevTools in development
-  if (process.env.NODE_ENV === 'development') {
+  if (isDev) {
     mainWindow.webContents.openDevTools();
   }
 };
@@ -490,6 +525,48 @@ const createWindow = () => {
 app.whenReady().then(() => {
   initSenderPaths();
   initGeneralSettings();
+  
+  // Initialiser le daemon seulement s'il est disponible
+  if (EmailSyncDaemon) {
+    try {
+      emailDaemon = new EmailSyncDaemon({
+        userDataPath: app.getPath('userData')
+      });
+      
+      // Écouter les événements du daemon
+      emailDaemon.on('started', () => {
+        console.log('📡 Email daemon démarré');
+      });
+      
+      emailDaemon.on('stopped', () => {
+        console.log('📡 Email daemon arrêté');
+      });
+      
+      emailDaemon.on('syncComplete', (stats) => {
+        console.log(`📧 Synchronisation terminée: ${stats.processedMessages} nouveaux messages`);
+      });
+      
+      emailDaemon.on('syncError', (error) => {
+        console.error('❌ Erreur de synchronisation daemon:', error.message);
+      });
+      
+      emailDaemon.on('newSender', (senderInfo) => {
+        console.log(`📬 Nouvel expéditeur détecté: ${senderInfo.email}`);
+      });
+      
+      emailDaemon.on('messageProcessed', (info) => {
+        console.log(`📩 Message traité: ${info.message.subject}`);
+      });
+      
+      console.log('✅ Email daemon initialisé');
+    } catch (daemonError) {
+      console.error('❌ Erreur lors de l\'initialisation du daemon:', daemonError);
+      emailDaemon = null;
+    }
+  } else {
+    console.log('⚠️ Email daemon non disponible - fonctionnalités limitées');
+  }
+  
   createWindow();
 
   app.on('activate', () => {
@@ -497,9 +574,27 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit when all windows are closed
+// Gérer la fermeture de l'application
+app.on('before-quit', () => {
+  if (emailDaemon) {
+    try {
+      emailDaemon.stop();
+    } catch (error) {
+      console.error('Erreur lors de l\'arrêt du daemon:', error);
+    }
+  }
+});
+
+// Gérer la fermeture de toutes les fenêtres
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // Sur macOS, laisser l'app tourner même si toutes les fenêtres sont fermées
+  if (process.platform === 'darwin') {
+    // Le daemon continue de tourner
+    console.log('🍎 Fenêtres fermées sur macOS - daemon continue en arrière-plan');
+  } else {
+    // Sur les autres plateformes, quitter complètement
+    app.quit();
+  }
 });
 
 // === IPC HANDLERS ===
@@ -1450,6 +1545,82 @@ ipcMain.handle('app:open-external', async (event, url) => {
     return { success: true };
   } catch (error) {
     console.error('Erreur lors de l\'ouverture du lien externe:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC Handlers pour le daemon
+ipcMain.handle('daemon:start', async () => {
+  try {
+    if (!emailDaemon) {
+      return { success: false, error: 'Daemon non disponible' };
+    }
+    
+    await emailDaemon.start();
+    return { success: true };
+  } catch (error) {
+    console.error('Erreur daemon:start:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('daemon:stop', async () => {
+  try {
+    if (!emailDaemon) {
+      return { success: false, error: 'Daemon non disponible' };
+    }
+    
+    emailDaemon.stop();
+    return { success: true };
+  } catch (error) {
+    console.error('Erreur daemon:stop:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('daemon:status', async () => {
+  try {
+    if (!emailDaemon) {
+      return { success: false, error: 'Daemon non disponible' };
+    }
+    
+    return { success: true, status: emailDaemon.getStatus() };
+  } catch (error) {
+    console.error('Erreur daemon:status:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('daemon:config', async (event, newConfig) => {
+  try {
+    if (!emailDaemon) {
+      return { success: false, error: 'Daemon non disponible' };
+    }
+    
+    if (newConfig) {
+      emailDaemon.updateConfig(newConfig);
+    }
+    return { success: true, config: emailDaemon.getConfig() };
+  } catch (error) {
+    console.error('Erreur daemon:config:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('daemon:sync-now', async () => {
+  try {
+    if (!emailDaemon) {
+      return { success: false, error: 'Daemon non disponible' };
+    }
+    
+    if (!emailDaemon.isRunning) {
+      return { success: false, error: 'Daemon non démarré' };
+    }
+    
+    await emailDaemon.performSync();
+    return { success: true };
+  } catch (error) {
+    console.error('Erreur daemon:sync-now:', error);
     return { success: false, error: error.message };
   }
 });

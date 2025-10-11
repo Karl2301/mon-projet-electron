@@ -55,6 +55,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Utility functions
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+  
+  // Daemon management
+  daemonStart: () => ipcRenderer.invoke('daemon:start'),
+  daemonStop: () => ipcRenderer.invoke('daemon:stop'),
+  daemonStatus: () => ipcRenderer.invoke('daemon:status'),
+  daemonConfig: (config) => ipcRenderer.invoke('daemon:config', config),
+  daemonSyncNow: () => ipcRenderer.invoke('daemon:sync-now'),
 });
 
 // AJOUTER CE LOG À LA FIN

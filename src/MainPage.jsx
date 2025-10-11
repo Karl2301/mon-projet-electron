@@ -24,6 +24,7 @@ import useNotifications from './useNotifications';
 import ToastContainer from './ToastContainer';
 import SaveEmailModal from './components/SaveEmailModal';
 import ExternalLink from './components/ExternalLink';
+import DaemonSettings from './components/DaemonSettings';
 
 const MainPage = ({ user, onLogout, onShowPricing }) => {
   const [deviceInfo, setDeviceInfo] = useState(null);
@@ -39,6 +40,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   const [showGeneralSettings, setShowGeneralSettings] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [selectedMessageToSave, setSelectedMessageToSave] = useState(null);
+  const [showDaemonSettings, setShowDaemonSettings] = useState(false);
   
   // Ajouter les états manquants
   const [senderPaths, setSenderPaths] = useState({});
@@ -767,9 +769,16 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                 Gérer les expéditeurs
               </button>
 
+              <button
+                onClick={() => setShowDaemonSettings(true)}
+                className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
+              >
+                <CloudSync className="mr-2" style={{ fontSize: 16 }} />
+                Service d'arrière-plan
+              </button>
               
               <button 
-                onClick={handleManualSync} // Utilisez handleManualSync au lieu de loadMessages
+                onClick={handleManualSync}
                 disabled={loading || backgroundSync}
                 className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-xl transition-colors inline-flex items-center disabled:opacity-50 text-sm"
               >
@@ -959,6 +968,23 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         onClose={handleCloseSaveModal}
         message={selectedMessageToSave}
         onSave={handleSaveComplete}
+      />
+
+      {/* Daemon Settings Modal */}
+      <DaemonSettings
+        isOpen={showDaemonSettings}
+        onClose={() => setShowDaemonSettings(false)}
+        onNotification={(type, message, options) => {
+          if (type === 'success') {
+            success(message, options);
+          } else if (type === 'error') {
+            error(message, options);
+          } else if (type === 'info') {
+            info(message, options);
+          } else if (type === 'warning') {
+            warning(message, options);
+          }
+        }}
       />
 
       {/* Toast Notifications */}
