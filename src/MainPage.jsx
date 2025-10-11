@@ -906,21 +906,6 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                       </div>
                     </div>
                     
-                    {/* Actions du message */}
-                    <div className="flex items-center space-x-2 flex-wrap">
-                      <button className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
-                        <Reply className="mr-2" style={{ fontSize: 16 }} />
-                        Répondre
-                      </button>
-                      <button className="bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
-                        <ReplyAll className="mr-2" style={{ fontSize: 16 }} />
-                        Répondre à tous
-                      </button>
-                      <button className="bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium py-2 px-3 rounded-lg text-sm transition-all duration-200 inline-flex items-center">
-                        <Forward className="mr-2" style={{ fontSize: 16 }} />
-                        Transférer
-                      </button>
-                    </div>
                   </div>
 
                   {/* Contenu du message */}
