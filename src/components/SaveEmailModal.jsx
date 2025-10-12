@@ -452,27 +452,60 @@ const SaveEmailModal = ({
                       </button>
                     </div>
                     
-                    {/* Affichage du comportement du dossier de dépôt */}
-                    {customPath && generalSettings?.emailDepositFolder && (
+                    {/* Affichage du comportement des dossiers de dépôt selon le type de message */}
+                    {customPath && generalSettings && (
                       <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                         <p className="text-sm text-blue-800 font-medium mb-1">
                           📁 Comportement de sauvegarde :
                         </p>
-                        <p className="text-xs text-blue-700">
-                          Le système vérifiera si le dossier "{generalSettings.emailDepositFolder}" existe dans le chemin sélectionné.
-                        </p>
-                        <div className="mt-2 space-y-1">
-                          <p className="text-xs text-blue-600">
-                            ✅ Si trouvé : <code className="bg-blue-100 px-1 rounded">{customPath}/{generalSettings.emailDepositFolder}/fichier.json</code>
-                          </p>
-                          <p className="text-xs text-blue-600">
-                            ❌ Si absent : <code className="bg-blue-100 px-1 rounded">{customPath}/fichier.json</code>
-                          </p>
-                        </div>
+                        
+                        {messageType === 'sent' ? (
+                          // Pour les messages envoyés
+                          generalSettings.sentEmailDepositFolder ? (
+                            <div className="space-y-2">
+                              <p className="text-xs text-blue-700">
+                                Le système vérifiera si le dossier "<strong>{generalSettings.sentEmailDepositFolder}</strong>" existe dans le chemin sélectionné et le créera si nécessaire.
+                              </p>
+                              <div className="space-y-1">
+                                <p className="text-xs text-blue-600">
+                                  ✅ Dossier trouvé/créé : <code className="bg-blue-100 px-1 rounded">{customPath}/{generalSettings.sentEmailDepositFolder}/SENT_fichier.json</code>
+                                </p>
+                                <p className="text-xs text-blue-600">
+                                  ❌ Création impossible : <code className="bg-blue-100 px-1 rounded">{customPath}/SENT_fichier.json</code>
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-blue-700">
+                              Aucun dossier de dépôt configuré pour les emails envoyés. Le fichier sera sauvegardé directement avec le préfixe "SENT_".
+                            </p>
+                          )
+                        ) : (
+                          // Pour les messages reçus
+                          (generalSettings.receivedEmailDepositFolder || generalSettings.emailDepositFolder) ? (
+                            <div className="space-y-2">
+                              <p className="text-xs text-blue-700">
+                                Le système vérifiera si le dossier "<strong>{generalSettings.receivedEmailDepositFolder || generalSettings.emailDepositFolder}</strong>" existe dans le chemin sélectionné.
+                              </p>
+                              <div className="space-y-1">
+                                <p className="text-xs text-blue-600">
+                                  ✅ Si trouvé : <code className="bg-blue-100 px-1 rounded">{customPath}/{generalSettings.receivedEmailDepositFolder || generalSettings.emailDepositFolder}/fichier.json</code>
+                                </p>
+                                <p className="text-xs text-blue-600">
+                                  ❌ Si absent : <code className="bg-blue-100 px-1 rounded">{customPath}/fichier.json</code>
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-blue-700">
+                              Aucun dossier de dépôt configuré pour les emails reçus. Le fichier sera sauvegardé directement.
+                            </p>
+                          )
+                        )}
                       </div>
                     )}
                     
-                    {customPath && !generalSettings?.emailDepositFolder && (
+                    {customPath && !generalSettings?.receivedEmailDepositFolder && !generalSettings?.sentEmailDepositFolder && !generalSettings?.emailDepositFolder && (
                       <p className="text-xs text-gray-500 mt-2">
                         Le fichier sera sauvegardé directement dans ce dossier (aucun dossier de dépôt configuré)
                       </p>

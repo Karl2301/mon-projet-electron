@@ -257,14 +257,18 @@ function loadGeneralSettings() {
     return { 
       rootFolder: '', 
       folderStructure: [],
-      emailDepositFolder: ''
+      emailDepositFolder: '', // Dossier pour emails reçus (rétrocompatibilité)
+      receivedEmailDepositFolder: '', // Nouveau: dossier spécifique pour emails reçus
+      sentEmailDepositFolder: '' // Nouveau: dossier spécifique pour emails envoyés
     };
   } catch (error) {
     console.error('Error loading general settings:', error);
     return { 
       rootFolder: '', 
       folderStructure: [],
-      emailDepositFolder: ''
+      emailDepositFolder: '',
+      receivedEmailDepositFolder: '',
+      sentEmailDepositFolder: ''
     };
   }
 }
@@ -284,7 +288,9 @@ function initGeneralSettings() {
       saveGeneralSettings({ 
         rootFolder: '', 
         folderStructure: [],
-        emailDepositFolder: ''
+        emailDepositFolder: '',
+        receivedEmailDepositFolder: '',
+        sentEmailDepositFolder: ''
       });
       console.log('✅ General settings file initialized');
     }
@@ -1430,17 +1436,25 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
     
     // Get general settings to check for email deposit folder
     const settings = loadGeneralSettings();
-    console.log('📁 Paramètres généraux:', settings);
     
     let finalPath = chosenPath;
     let depositFolderUsed = false;
+    let depositFolderName = '';
+    
+    // Déterminer quel dossier de dépôt utiliser pour les emails reçus
+    if (settings.receivedEmailDepositFolder && settings.receivedEmailDepositFolder.trim() !== '') {
+      // Nouveau paramètre spécifique pour les emails reçus
+      depositFolderName = settings.receivedEmailDepositFolder.trim();
+    } else if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
+      // Fallback sur l'ancien paramètre pour rétrocompatibilité
+      depositFolderName = settings.emailDepositFolder.trim();
+    }
     
     // Vérifier si un dossier de dépôt est configuré
-    if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
-      const depositFolderName = settings.emailDepositFolder.trim();
+    if (depositFolderName) {
       const depositFolderPath = path.join(chosenPath, depositFolderName);
       
-      console.log('🔍 Vérification du dossier de dépôt:', depositFolderName);
+      console.log('🔍 Vérification du dossier de dépôt pour emails reçus:', depositFolderName);
       console.log('📂 Chemin complet du dossier de dépôt:', depositFolderPath);
       
       // Vérifier si le dossier de dépôt existe dans le chemin choisi
@@ -1454,12 +1468,8 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
         depositFolderUsed = false;
       }
     } else {
-      console.log('📂 Aucun dossier de dépôt configuré, sauvegarde directe');
+      console.log('📂 Aucun dossier de dépôt configuré pour les emails reçus, sauvegarde directe');
     }
-    
-    console.log('📂 Chemin final de sauvegarde:', finalPath);
-    console.log('📂 Chemin de base choisi:', chosenPath);
-    console.log('📂 Dossier de dépôt utilisé:', depositFolderUsed);
     
     // Create filename
     const date = new Date(message.receivedDateTime);
@@ -1518,13 +1528,14 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
       fileName: fileName,
       senderEmail: senderEmail,
       senderName: senderName,
-      depositFolder: settings.emailDepositFolder || null,
+      depositFolder: depositFolderName || null,
       depositFolderUsed: depositFolderUsed,
       pathSaved: savePathForFuture,
       isClientSelection: isClientSelection,
       clientName: clientInfo?.clientName || null,
-      actualSavePath: finalPath, // Le chemin complet où le fichier a été sauvé
-      basePath: chosenPath // Le chemin de base choisi par l'utilisateur
+      actualSavePath: finalPath,
+      basePath: chosenPath,
+      messageType: 'received'
     };
     
     console.log('✅ Résultat complet de la sauvegarde:', result);
@@ -1684,20 +1695,46 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
     const settings = loadGeneralSettings();
     let finalPath = chosenPath;
     let depositFolderUsed = false;
+    let depositFolderName = '';
     
-    // Vérifier si un dossier de dépôt est configuré
-    if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
-      const depositFolderName = settings.emailDepositFolder.trim();
-      const depositFolderPath = path.join(chosenPath, depositFolderName);
+    // Déterminer quel dossier de dépôt utiliser pour les emails envoyés
+    if (settings.sentEmailDepositFolder && settings.sentEmailDepositFolder.trim() !== '') {
+      // Paramètre spécifique pour les emails envoyés
+      depositFolderName = settings.sentEmailDepositFolder.trim();
       
+      console.log('🔍 Vérification du dossier de dépôt pour emails envoyés:', depositFolderName);
+      console.log('📂 Chemin de base choisi:', chosenPath);
+      
+      // Construire le chemin complet du dossier de dépôt
+      const depositFolderPath = path.join(chosenPath, depositFolderName);
+      console.log('📂 Chemin complet du dossier de dépôt:', depositFolderPath);
+      
+      // Vérifier si le dossier de dépôt existe dans le chemin choisi
       if (fs.existsSync(depositFolderPath)) {
+        console.log('✅ Dossier de dépôt trouvé, utilisation du chemin avec dossier de dépôt');
         finalPath = depositFolderPath;
         depositFolderUsed = true;
       } else {
-        finalPath = chosenPath;
-        depositFolderUsed = false;
+        console.log('❌ Dossier de dépôt non trouvé, tentative de création...');
+        
+        // Essayer de créer le dossier de dépôt
+        try {
+          fs.mkdirSync(depositFolderPath, { recursive: true });
+          console.log('✅ Dossier de dépôt créé avec succès');
+          finalPath = depositFolderPath;
+          depositFolderUsed = true;
+        } catch (createError) {
+          console.log('❌ Impossible de créer le dossier de dépôt, sauvegarde directe dans le chemin choisi');
+          console.error('Erreur de création:', createError);
+          finalPath = chosenPath;
+          depositFolderUsed = false;
+        }
       }
+    } else {
+      console.log('📂 Aucun dossier de dépôt configuré pour les emails envoyés, sauvegarde directe');
     }
+    
+    console.log('📂 Chemin final de sauvegarde:', finalPath);
     
     // Create filename with SENT prefix to distinguish
     const date = new Date(message.sentDateTime);
@@ -1707,30 +1744,47 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
     const fileName = `SENT_${dateStr}_${timeStr}_${subject}.json`;
     
     const filePath = path.join(finalPath, fileName);
+    console.log('📄 Fichier à créer:', filePath);
     
     // Ensure directory exists
     if (!fs.existsSync(finalPath)) {
+      console.log('📁 Création du dossier final:', finalPath);
       fs.mkdirSync(finalPath, { recursive: true });
     }
     
-    // Save file
+    // Save file with detailed logging
+    console.log('💾 Écriture du fichier...');
     const messageContent = JSON.stringify(message, null, 2);
     fs.writeFileSync(filePath, messageContent, 'utf8');
     
+    // Verify file was created
+    if (fs.existsSync(filePath)) {
+      const stats = fs.statSync(filePath);
+      console.log('✅ Fichier créé avec succès:', {
+        path: filePath,
+        size: stats.size,
+        created: stats.birthtime
+      });
+    } else {
+      throw new Error('Le fichier n\'a pas été créé');
+    }
+    
     // Save path for future use if requested (basé sur le destinataire)
     if (savePathForFuture && recipientEmail) {
+      console.log('💾 Sauvegarde/Mise à jour du chemin pour le futur:', recipientEmail);
       const paths = loadSenderPaths();
       const now = new Date().toISOString();
       
       paths[recipientEmail] = {
         sender_email: recipientEmail,
         sender_name: recipientName,
-        folder_path: chosenPath,
+        folder_path: chosenPath, // Toujours sauvegarder le chemin de base (sans le dossier de dépôt)
         created_at: paths[recipientEmail]?.created_at || now,
         updated_at: now
       };
       
       saveSenderPaths(paths);
+      console.log('✅ Chemin sauvegardé pour:', recipientEmail, 'vers:', chosenPath);
     }
     
     const result = { 
@@ -1739,7 +1793,7 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
       fileName: fileName,
       recipientEmail: recipientEmail,
       recipientName: recipientName,
-      depositFolder: settings.emailDepositFolder || null,
+      depositFolder: depositFolderName || null,
       depositFolderUsed: depositFolderUsed,
       pathSaved: savePathForFuture,
       isClientSelection: isClientSelection,
@@ -1749,10 +1803,12 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
       messageType: 'sent'
     };
     
+    console.log('✅ Résultat complet de la sauvegarde des emails envoyés:', result);
     return result;
     
   } catch (error) {
     console.error('❌ Erreur lors de la sauvegarde du message envoyé:', error);
+    console.error('Stack trace:', error.stack);
     return { success: false, error: error.message };
   }
 });
