@@ -371,12 +371,13 @@ const SaveEmailModal = ({
               )}
 
               {/* Existing Clients Tab */}
+              {/* Existing Clients Tab */}
               {activeTab === 'existing' && (
                 <div className="space-y-2 max-h-60 overflow-y-auto">
                   {existingClients.length > 0 ? (
                     existingClients.map((client, index) => (
                       <div
-                        key={`${client.senderEmail}-${index}`} // Clé unique basée sur l'email
+                        key={`${client.senderEmail}-${index}`}
                         className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                           selectedClient?.senderEmail === client.senderEmail
                             ? 'border-blue-500 bg-blue-50'
@@ -400,8 +401,17 @@ const SaveEmailModal = ({
                             </p>
                           </div>
                           
-                          {/* Indicateur si c'est l'expéditeur actuel */}
-                          {client.senderEmail === message?.from?.emailAddress?.address && (
+                          {/* Indicateur si c'est le correspondant actuel */}
+                          {messageType === 'sent' && client.isCorrespondent && (
+                            <div className="ml-2 flex-shrink-0">
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                ✉️ Correspondant
+                              </span>
+                            </div>
+                          )}
+                          
+                          {/* Indicateur si c'est l'expéditeur actuel pour les emails reçus */}
+                          {messageType === 'received' && client.senderEmail === message?.from?.emailAddress?.address && (
                             <div className="ml-2 flex-shrink-0">
                               <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
                                 Actuel
@@ -422,8 +432,8 @@ const SaveEmailModal = ({
                     ))
                   ) : (
                     <div className="text-center py-8 text-gray-500">
-                      <p>Aucun expéditeur configuré</p>
-                      <p className="text-sm mt-1">Les expéditeurs seront ajoutés automatiquement lors des sauvegardes</p>
+                      <p>Aucun correspondant configuré</p>
+                      <p className="text-sm mt-1">Les correspondants seront ajoutés automatiquement lors des sauvegardes</p>
                     </div>
                   )}
                 </div>

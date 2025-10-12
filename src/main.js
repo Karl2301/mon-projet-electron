@@ -60,6 +60,24 @@ function getOAuthConfigPath() {
   return path.join(__dirname, '..', 'oauth.config.json');
 }
 
+function findExistingCorrespondent(email) {
+  const paths = loadSenderPaths();
+  
+  // Chercher d'abord par email exact
+  if (paths[email]) {
+    return paths[email];
+  }
+  
+  // Chercher dans tous les enregistrements si cet email existe comme expéditeur
+  for (const [senderEmail, pathInfo] of Object.entries(paths)) {
+    if (senderEmail === email) {
+      return pathInfo;
+    }
+  }
+  
+  return null;
+}
+
 // Fonction pour charger la configuration OAuth - VERSION CORRIGÉE
 function loadOAuthConfig() {
   try {
@@ -1387,6 +1405,40 @@ ipcMain.handle('settings:save-general', async (event, settings) => {
   }
 });
 
+
+function suggestClientForSentEmail(recipientEmail, recipientName) {
+  try {
+    const paths = loadSenderPaths();
+    const settings = loadGeneralSettings();
+    
+    // Chercher si ce destinataire existe déjà comme expéditeur dans nos enregistrements
+    const existingCorrespondent = findExistingCorrespondent(recipientEmail);
+    
+    if (existingCorrespondent) {
+      return {
+        type: 'existing_correspondent',
+        clientName: path.basename(existingCorrespondent.folder_path),
+        folderPath: existingCorrespondent.folder_path,
+        confidence: 'high',
+        reason: `Correspondant existant : ${existingCorrespondent.sender_name}`
+      };
+    }
+    
+    // Si pas trouvé, appliquer la même logique que pour les emails reçus
+    return suggestClientForEmail(recipientEmail, recipientName);
+    
+  } catch (error) {
+    console.error('Error suggesting client for sent email:', error);
+    return {
+      type: 'error',
+      clientName: null,
+      folderPath: null,
+      confidence: 'none',
+      reason: 'Erreur lors de la suggestion'
+    };
+  }
+}
+
 // Function to suggest client based on sender email and name
 function suggestClientForEmail(senderEmail, senderName) {
   try {
@@ -1703,7 +1755,6 @@ ipcMain.handle('outlook:get-sent-messages-paginated', async (event, { accessToke
 // Enhanced save sent message handler - BASÉ SUR LE DESTINATAIRE
 ipcMain.handle('save-sent-message-with-suggestion', async (event, { message }) => {
   try {
-    // Pour les emails envoyés, on utilise le premier destinataire comme référence
     const recipientEmail = message.toRecipients?.[0]?.emailAddress?.address;
     const recipientName = message.toRecipients?.[0]?.emailAddress?.name;
     
@@ -1714,19 +1765,25 @@ ipcMain.handle('save-sent-message-with-suggestion', async (event, { message }) =
       };
     }
     
-    // Get suggestion for this recipient email (même logique que pour les expéditeurs)
-    const suggestion = suggestClientForEmail(recipientEmail, recipientName);
+    // Utiliser la nouvelle fonction de suggestion pour les emails envoyés
+    const suggestion = suggestClientForSentEmail(recipientEmail, recipientName);
     
-    // Get all existing clients for alternative options
+    // Obtenir tous les clients existants
     const allPaths = loadSenderPaths();
     const existingClients = Object.values(allPaths).map(p => ({
       clientName: path.basename(p.folder_path),
       folderPath: p.folder_path,
       senderName: p.sender_name,
-      senderEmail: p.sender_email
+      senderEmail: p.sender_email,
+      // Ajouter une indication si c'est le même correspondant
+      isCorrespondent: p.sender_email === recipientEmail
     }));
     
     const sortedClients = existingClients.sort((a, b) => {
+      // Mettre les correspondants existants en premier
+      if (a.isCorrespondent && !b.isCorrespondent) return -1;
+      if (!a.isCorrespondent && b.isCorrespondent) return 1;
+      
       const nameComparison = a.senderName.localeCompare(b.senderName);
       if (nameComparison !== 0) return nameComparison;
       return a.senderEmail.localeCompare(b.senderEmail);
@@ -1738,7 +1795,7 @@ ipcMain.handle('save-sent-message-with-suggestion', async (event, { message }) =
       existingClients: sortedClients,
       recipientEmail,
       recipientName,
-      messageType: 'sent' // Identifier le type de message
+      messageType: 'sent'
     };
     
   } catch (error) {
@@ -1752,26 +1809,15 @@ ipcMain.handle('save-sent-message-with-suggestion', async (event, { message }) =
 
 // Mise à jour similaire pour save-sent-message-to-path
 ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath, savePathForFuture = false, isClientSelection = false, clientInfo = null }) => {
-  console.log('🔄 save-sent-message-to-path:', {
-    chosenPath,
-    savePathForFuture,
-    isClientSelection,
-    clientInfo: clientInfo?.clientName,
-    subject: message?.subject,
-    recipientEmail: message?.toRecipients?.[0]?.emailAddress?.address
-  });
-
   try {
     const recipientEmail = message.toRecipients?.[0]?.emailAddress?.address;
     const recipientName = message.toRecipients?.[0]?.emailAddress?.name;
     
     if (!chosenPath) {
-      console.error('❌ Aucun chemin fourni');
       return { success: false, error: 'Aucun chemin sélectionné' };
     }
 
     if (!message) {
-      console.error('❌ Aucun message fourni');
       return { success: false, error: 'Aucun message à sauvegarder' };
     }
     
@@ -1780,46 +1826,25 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
     let depositFolderUsed = false;
     let depositFolderName = '';
     
-    // Déterminer quel dossier de dépôt utiliser pour les emails envoyés
+    // Logique du dossier de dépôt pour les emails envoyés
     if (settings.sentEmailDepositFolder && settings.sentEmailDepositFolder.trim() !== '') {
-      // Paramètre spécifique pour les emails envoyés
       depositFolderName = settings.sentEmailDepositFolder.trim();
-      
-      console.log('🔍 Vérification du dossier de dépôt pour emails envoyés:', depositFolderName);
-      console.log('📂 Chemin de base choisi:', chosenPath);
-      
-      // Construire le chemin complet du dossier de dépôt
       const depositFolderPath = path.join(chosenPath, depositFolderName);
-      console.log('📂 Chemin complet du dossier de dépôt:', depositFolderPath);
       
-      // Vérifier si le dossier de dépôt existe dans le chemin choisi
-      if (fs.existsSync(depositFolderPath)) {
-        console.log('✅ Dossier de dépôt trouvé, utilisation du chemin avec dossier de dépôt');
+      try {
+        if (!fs.existsSync(depositFolderPath)) {
+          fs.mkdirSync(depositFolderPath, { recursive: true });
+        }
         finalPath = depositFolderPath;
         depositFolderUsed = true;
-      } else {
-        console.log('❌ Dossier de dépôt non trouvé, tentative de création...');
-        
-        // Essayer de créer le dossier de dépôt
-        try {
-          fs.mkdirSync(depositFolderPath, { recursive: true });
-          console.log('✅ Dossier de dépôt créé avec succès');
-          finalPath = depositFolderPath;
-          depositFolderUsed = true;
-        } catch (createError) {
-          console.log('❌ Impossible de créer le dossier de dépôt, sauvegarde directe dans le chemin choisi');
-          console.error('Erreur de création:', createError);
-          finalPath = chosenPath;
-          depositFolderUsed = false;
-        }
+      } catch (depositError) {
+        console.warn('Impossible de créer le dossier de dépôt:', depositError);
+        finalPath = chosenPath;
+        depositFolderUsed = false;
       }
-    } else {
-      console.log('📂 Aucun dossier de dépôt configuré pour les emails envoyés, sauvegarde directe');
     }
     
-    console.log('📂 Chemin final de sauvegarde:', finalPath);
-    
-    // Create filename using pattern from settings for sent messages
+    // Générer le nom de fichier avec le pattern pour les emails envoyés
     const pattern = settings.filenamePatternSent || 'SENT_{date}_{time}_{subject}';
     const fileFormat = settings.fileFormat || 'json';
     const baseFilename = generateFilename(message, pattern, 'sent');
@@ -1827,12 +1852,13 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
     
     const filePath = path.join(finalPath, fileName);
     
-    // ...existing code pour la création du dossier...
+    // Créer le dossier si nécessaire
+    if (!fs.existsSync(finalPath)) {
+      fs.mkdirSync(finalPath, { recursive: true });
+    }
     
-    // Save file based on format
-    console.log('💾 Écriture du fichier...');
+    // Sauvegarder le fichier
     let messageContent;
-    
     switch (fileFormat) {
       case 'json':
         messageContent = JSON.stringify(message, null, 2);
@@ -1858,7 +1884,26 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
     
     fs.writeFileSync(filePath, messageContent, 'utf8');
     
-    // ...existing code pour le reste...
+    // Si savePathForFuture est activé, enregistrer ce destinataire comme nouveau correspondant
+    if (savePathForFuture && recipientEmail && recipientName) {
+      try {
+        const paths = loadSenderPaths();
+        const now = new Date().toISOString();
+        
+        // Enregistrer le destinataire comme s'il était un expéditeur
+        paths[recipientEmail] = {
+          sender_email: recipientEmail,
+          sender_name: recipientName,
+          folder_path: chosenPath,
+          created_at: paths[recipientEmail]?.created_at || now,
+          updated_at: now
+        };
+        
+        saveSenderPaths(paths);
+      } catch (pathError) {
+        console.warn('Erreur lors de la sauvegarde du chemin:', pathError);
+      }
+    }
     
     const result = { 
       success: true, 
@@ -1878,12 +1923,10 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
       filenamePattern: pattern
     };
     
-    console.log('✅ Résultat complet de la sauvegarde des emails envoyés:', result);
     return result;
     
   } catch (error) {
-    console.error('❌ Erreur lors de la sauvegarde du message envoyé:', error);
-    console.error('Stack trace:', error.stack);
+    console.error('Erreur lors de la sauvegarde du message envoyé:', error);
     return { success: false, error: error.message };
   }
 });

@@ -268,20 +268,34 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   };
 
   const checkSenderPath = async (message) => {
-    const senderEmail = message.from?.emailAddress?.address;
-    if (!senderEmail) return true;
+    // CORRECTION : Adapter selon le type d'onglet
+    let contactEmail, contactName;
+    
+    if (currentTab === 'sent') {
+      // Pour les emails envoyés, vérifier le destinataire
+      contactEmail = message.toRecipients?.[0]?.emailAddress?.address;
+      contactName = message.toRecipients?.[0]?.emailAddress?.name;
+    } else {
+      // Pour les emails reçus, vérifier l'expéditeur
+      contactEmail = message.from?.emailAddress?.address;
+      contactName = message.from?.emailAddress?.name;
+    }
+    
+    if (!contactEmail) return true;
 
     try {
-      const senderPath = await window.electronAPI.getSenderPath(senderEmail);
-      if (!senderPath) {
+      const contactPath = await window.electronAPI.getSenderPath(contactEmail);
+      if (!contactPath) {
         setCurrentSender({
-          email: senderEmail,
-          name: message.from?.emailAddress?.name
+          email: contactEmail,
+          name: contactName
         });
         setShowSenderModal(true);
+        
+        const contactType = currentTab === 'sent' ? 'destinataire' : 'expéditeur';
         warning('Configuration requise', {
-          title: 'Nouveau expéditeur',
-          details: `Veuillez configurer un dossier pour ${message.from?.emailAddress?.name || senderEmail}`
+          title: `Nouveau ${contactType}`,
+          details: `Veuillez configurer un dossier pour ${contactName || contactEmail}`
         });
         return false;
       }
@@ -290,6 +304,11 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
       console.error('Erreur lors de la vérification du chemin:', checkError);
       return false;
     }
+  };
+
+  const handleMessageClick = async (message) => {
+    setSelectedMessage(message);
+    await checkSenderPath(message);
   };
 
   const handleSaveSenderPath = async (senderData) => {
@@ -371,22 +390,34 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
 
   const saveMessage = async (message) => {
     try {
-      // Vérifier d'abord si l'expéditeur a un chemin configuré
-      const senderEmail = message.from?.emailAddress?.address;
-      if (!senderEmail) {
+      // CORRECTION : Adapter selon le type d'onglet
+      let contactEmail, contactName;
+      
+      if (currentTab === 'sent') {
+        // Pour les emails envoyés, utiliser le destinataire
+        contactEmail = message.toRecipients?.[0]?.emailAddress?.address;
+        contactName = message.toRecipients?.[0]?.emailAddress?.name;
+      } else {
+        // Pour les emails reçus, utiliser l'expéditeur
+        contactEmail = message.from?.emailAddress?.address;
+        contactName = message.from?.emailAddress?.name;
+      }
+      
+      if (!contactEmail) {
         error('Erreur lors de la sauvegarde', {
           title: 'Email invalide',
-          details: 'Impossible de déterminer l\'expéditeur du message'
+          details: 'Impossible de déterminer le contact du message'
         });
         return;
       }
 
-      // Vérifier le chemin de l'expéditeur
-      const senderPath = await window.electronAPI.getSenderPath(senderEmail);
-      if (!senderPath) {
+      // Vérifier le chemin du contact
+      const contactPath = await window.electronAPI.getSenderPath(contactEmail);
+      if (!contactPath) {
+        const contactType = currentTab === 'sent' ? 'destinataire' : 'expéditeur';
         warning('Configuration requise', {
           title: 'Dossier non configuré',
-          details: `Veuillez d'abord configurer un dossier pour ${message.from?.emailAddress?.name || senderEmail}`
+          details: `Veuillez d'abord configurer un dossier pour ce ${contactType} : ${contactName || contactEmail}`
         });
         await checkSenderPath(message);
         return;
@@ -397,16 +428,27 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         title: 'Sauvegarde du message'
       });
 
-      // Utiliser une fonction différente ou créer le fichier manuellement
-      const result = await window.electronAPI.saveMessage({
-        message: message,
-        senderPath: senderPath.folder_path,
-        senderEmail: senderEmail,
-        senderName: senderPath.sender_name || message.from?.emailAddress?.name
-      });
+      // Utiliser la fonction appropriée selon le type de message
+      let result;
+      if (currentTab === 'sent') {
+        result = await window.electronAPI.saveSentMessage({
+          message: message,
+          senderPath: contactPath.folder_path,
+          recipientEmail: contactEmail,
+          recipientName: contactPath.sender_name || contactName
+        });
+      } else {
+        result = await window.electronAPI.saveMessage({
+          message: message,
+          senderPath: contactPath.folder_path,
+          senderEmail: contactEmail,
+          senderName: contactPath.sender_name || contactName
+        });
+      }
       
       if (result.success) {
-        success('Message sauvegardé avec succès', {
+        const messageType = currentTab === 'sent' ? 'envoyé' : 'reçu';
+        success(`Message ${messageType} sauvegardé avec succès`, {
           title: 'Sauvegarde terminée',
           details: result.fileName || 'Fichier sauvegardé'
         });
@@ -419,7 +461,6 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
     } catch (saveError) {
       console.error('Erreur lors de la sauvegarde:', saveError);
       
-      // Afficher plus de détails sur l'erreur
       let errorMessage = 'Erreur inconnue';
       if (saveError.message) {
         errorMessage = saveError.message;
@@ -434,13 +475,38 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
     }
   };
 
-  const handleMessageClick = async (message) => {
-    setSelectedMessage(message);
-    await checkSenderPath(message);
+
+  const getSenderPathInfo = (contactEmail) => {
+    // Pour les emails reçus : chercher l'expéditeur
+    // Pour les emails envoyés : chercher le destinataire
+    return senderPaths[contactEmail] || null;
   };
 
-  const getSenderPathInfo = (senderEmail) => {
-    return senderPaths[senderEmail] || null;
+  const getCorrespondentInfo = (message, tab) => {
+    if (tab === 'sent') {
+      // Pour les emails envoyés, on s'intéresse au destinataire
+      const recipientEmail = message.toRecipients?.[0]?.emailAddress?.address;
+      const recipientName = message.toRecipients?.[0]?.emailAddress?.name;
+      return {
+        email: recipientEmail,
+        name: recipientName,
+        pathInfo: getSenderPathInfo(recipientEmail)
+      };
+    } else {
+      // Pour les emails reçus, on s'intéresse à l'expéditeur
+      const senderEmail = message.from?.emailAddress?.address;
+      const senderName = message.from?.emailAddress?.name;
+      return {
+        email: senderEmail,
+        name: senderName,
+        pathInfo: getSenderPathInfo(senderEmail)
+      };
+    }
+  };
+
+  const getBasename = (filePath) => {
+    if (!filePath) return '';
+    return filePath.split('/').pop() || filePath.split('\\').pop() || '';
   };
 
   const getSyncStatusIcon = () => {
@@ -871,14 +937,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                   ) : (
                     <>
                       {getCurrentMessages().map((message) => {
-                        // Pour les messages envoyés, utiliser le destinataire au lieu de l'expéditeur
-                        const contactEmail = currentTab === 'sent' 
-                          ? message.toRecipients?.[0]?.emailAddress?.address
-                          : message.from?.emailAddress?.address;
-                        const contactName = currentTab === 'sent'
-                          ? message.toRecipients?.[0]?.emailAddress?.name
-                          : message.from?.emailAddress?.name;
-                        const senderPathInfo = getSenderPathInfo(contactEmail);
+                        const correspondentInfo = getCorrespondentInfo(message, currentTab);
                         
                         return (
                           <div 
@@ -895,14 +954,21 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                                     currentTab === 'sent' ? 'bg-green-500' : 'bg-blue-500'
                                   }`}></div>
                                   <p className="font-semibold text-gray-900 truncate flex-1">
-                                    {currentTab === 'sent' ? `À: ${contactName || contactEmail}` : contactName || contactEmail}
+                                    {currentTab === 'sent' 
+                                      ? `À: ${correspondentInfo.name || correspondentInfo.email}` 
+                                      : `De: ${correspondentInfo.name || correspondentInfo.email}`
+                                    }
                                   </p>
                                   <div className="flex items-center ml-2 flex-shrink-0">
                                     {message.hasAttachments && (
                                       <Attachment className="text-gray-400 mr-1" style={{ fontSize: 16 }} />
                                     )}
-                                    {senderPathInfo && (
-                                      <FolderSpecial className="text-green-500" style={{ fontSize: 16 }} title="Dossier configuré" />
+                                    {correspondentInfo.pathInfo && (
+                                      <FolderSpecial 
+                                        className="text-green-500" 
+                                        style={{ fontSize: 16 }} 
+                                        title={`Correspondant configuré : ${getBasename(correspondentInfo.pathInfo.folder_path)}`} 
+                                      />
                                     )}
                                   </div>
                                 </div>
@@ -951,14 +1017,14 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                           {currentTab === 'sent' ? (
                             <>
                               <div className="flex items-start">
-                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">À:</span>
+                                <span className="text-xsm text-gray-500 w-16 flex-shrink-0">À:</span>
                                 <div className="flex-1 min-w-0">
                                   <span className="text-sm text-gray-900 font-medium break-words">
                                     {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
                                   </span>
                                   {getSenderPathInfo(selectedMessage.toRecipients?.[0]?.emailAddress?.address) && (
                                     <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
-                                      Dossier configuré
+                                      📁 Correspondant configuré
                                     </div>
                                   )}
                                 </div>
@@ -980,7 +1046,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                                   </span>
                                   {getSenderPathInfo(selectedMessage.from?.emailAddress?.address) && (
                                     <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
-                                      Dossier configuré
+                                      📁 Correspondant configuré
                                     </div>
                                   )}
                                 </div>
