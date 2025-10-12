@@ -6,6 +6,7 @@ import { theme } from './theme';
 import LoginPage from './LoginPage';
 import MainPage from './MainPage';
 import PricingPage from './PricingPage';
+import { FileFormatProvider } from './contexts/FileFormatContext'; // NOUVEAU
 
 // Context pour gérer les états globaux
 const AppStateContext = createContext();
@@ -272,7 +273,9 @@ const App = () => {
 
 const AppWithProvider = () => (
   <AppStateProvider>
-    <App />
+    <FileFormatProvider>
+      <App />
+    </FileFormatProvider>
   </AppStateProvider>
 );
 

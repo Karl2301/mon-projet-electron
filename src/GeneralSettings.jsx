@@ -13,8 +13,11 @@ import {
   CreateNewFolder,
   FolderSpecial,
   Inbox,
-  Send
+  Send,
+  Description, // NOUVEAU
+  Code // NOUVEAU
 } from '@mui/icons-material';
+import FileFormatSettings from './components/FileFormatSettings';
 
 const GeneralSettings = ({ isOpen, onClose, onSettingsUpdated }) => {
   const [settings, setSettings] = useState({
@@ -28,6 +31,8 @@ const GeneralSettings = ({ isOpen, onClose, onSettingsUpdated }) => {
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [pendingRootFolder, setPendingRootFolder] = useState('');
+  const [showFileFormatModal, setShowFileFormatModal] = useState(false);
+  const [fileFormatKey, setFileFormatKey] = useState(0); // Nouveau: clé pour forcer le remount uniquement quand nécessaire
 
   useEffect(() => {
     if (isOpen) {
@@ -45,13 +50,19 @@ const GeneralSettings = ({ isOpen, onClose, onSettingsUpdated }) => {
         savedSettings.receivedEmailDepositFolder = savedSettings.emailDepositFolder;
       }
       
-      setSettings(savedSettings || { 
+      // Valeurs par défaut pour les nouveaux paramètres
+      const defaultSettings = {
         rootFolder: '', 
         folderStructure: [], 
         emailDepositFolder: '',
         receivedEmailDepositFolder: '',
-        sentEmailDepositFolder: ''
-      });
+        sentEmailDepositFolder: '',
+        fileFormat: 'json',
+        filenamePattern: '{date}_{time}_{subject}',
+        filenamePatternSent: 'SENT_{date}_{time}_{subject}'
+      };
+      
+      setSettings({ ...defaultSettings, ...savedSettings });
     } catch (error) {
       console.error('Erreur lors du chargement des paramètres:', error);
     } finally {
@@ -500,6 +511,149 @@ const GeneralSettings = ({ isOpen, onClose, onSettingsUpdated }) => {
 
   const availableFolders = getAvailableFolders(settings.folderStructure);
 
+  const handleFileFormatUpdated = (newFormatSettings) => {
+    // Mettre à jour les paramètres locaux avec les nouvelles valeurs
+    setSettings(prev => ({
+      ...prev,
+      ...newFormatSettings
+    }));
+    
+    // Fermer la modal et incrémenter la clé seulement après une vraie sauvegarde
+    setShowFileFormatModal(false);
+    setFileFormatKey(prev => prev + 1);
+    
+    if (onSettingsUpdated) {
+      onSettingsUpdated('success', 'Format et nommage mis à jour', {
+        title: 'Configuration sauvegardée'
+      });
+    }
+  };
+
+  // Modules disponibles pour le nommage
+  const getAvailableModules = () => [
+    // Date et heure
+    { module: '{date}', description: 'Date (YYYY-MM-DD)', example: '2024-01-15' },
+    { module: '{date_fr}', description: 'Date française (DD-MM-YYYY)', example: '15-01-2024' },
+    { module: '{date_us}', description: 'Date américaine (MM-DD-YYYY)', example: '01-15-2024' },
+    { module: '{year}', description: 'Année', example: '2024' },
+    { module: '{month}', description: 'Mois (01-12)', example: '01' },
+    { module: '{day}', description: 'Jour (01-31)', example: '15' },
+    { module: '{time}', description: 'Heure (HH-MM-SS)', example: '14-30-25' },
+    { module: '{time_12}', description: 'Heure 12h (HH-MM-SSAM/PM)', example: '02-30-25PM' },
+    { module: '{hour}', description: 'Heure (00-23)', example: '14' },
+    { module: '{minute}', description: 'Minutes (00-59)', example: '30' },
+    { module: '{second}', description: 'Secondes (00-59)', example: '25' },
+    
+    // Informations du message
+    { module: '{subject}', description: 'Sujet du mail (max 50 chars)', example: 'Reunion_importante' },
+    { module: '{subject_short}', description: 'Sujet court (max 20 chars)', example: 'Reunion_import' },
+    
+    // Informations sur les emails
+    { module: '{sender_email}', description: 'Email expéditeur/utilisateur', example: 'john_doe_example_com' },
+    { module: '{sender_name}', description: 'Nom expéditeur/utilisateur', example: 'John_Doe' },
+    { module: '{recipient_email}', description: 'Email destinataire/utilisateur', example: 'jane_smith_example_com' },
+    { module: '{recipient_name}', description: 'Nom destinataire/utilisateur', example: 'Jane_Smith' },
+    
+    // Informations techniques
+    { module: '{message_id}', description: 'ID du message (8 premiers chars)', example: 'abc12345' },
+    { module: '{importance}', description: 'Importance du message', example: 'high' },
+    { module: '{has_attachments}', description: 'Présence de pièces jointes', example: 'with-attachments' },
+    
+    // Timestamps
+    { module: '{timestamp}', description: 'Timestamp Unix', example: '1705334425' },
+    { module: '{timestamp_ms}', description: 'Timestamp millisecondes', example: '1705334425123' },
+    
+    // Formats spéciaux
+    { module: '{week_day}', description: 'Jour de la semaine', example: 'lundi' },
+    { module: '{month_name}', description: 'Nom du mois', example: 'janvier' },
+    { module: '{quarter}', description: 'Trimestre', example: 'Q1' },
+    
+    // Préfixes automatiques
+    { module: '{type_prefix}', description: 'Préfixe automatique SENT/RECEIVED', example: 'RECEIVED' },
+    { module: '{direction}', description: 'Direction OUT/IN', example: 'IN' }
+  ];
+
+  const insertModule = (module, isForSent = false) => {
+    const field = isForSent ? 'filenamePatternSent' : 'filenamePattern';
+    const currentPattern = settings[field];
+    setSettings(prev => ({
+      ...prev,
+      [field]: currentPattern + module
+    }));
+  };
+
+  const getPreviewFilename = (pattern, isSent = false) => {
+    if (!pattern || typeof pattern !== 'string') {
+      return 'pattern_invalide';
+    }
+
+    const mockMessage = {
+      subject: 'Réunion équipe projet',
+      sentDateTime: new Date().toISOString(),
+      receivedDateTime: new Date().toISOString(),
+      from: { emailAddress: { name: 'John Doe', address: 'john.doe@example.com' } },
+      toRecipients: [{ emailAddress: { name: 'Jane Smith', address: 'jane.smith@example.com' } }],
+      id: 'abcd1234567890',
+      importance: 'normal',
+      hasAttachments: false
+    };
+
+    // Simuler la génération du nom de fichier
+    const date = new Date();
+    const modules = {
+      '{date}': date.toISOString().split('T')[0],
+      '{date_fr}': date.toLocaleDateString('fr-FR').replace(/\//g, '-'),
+      '{date_us}': date.toLocaleDateString('en-US').replace(/\//g, '-'),
+      '{time}': date.toTimeString().split(' ')[0].replace(/:/g, '-'),
+      '{time_12}': date.toLocaleTimeString('en-US', { hour12: true }).replace(/:/g, '-').replace(/\s/g, ''),
+      '{subject}': 'Reunion_equipe_projet',
+      '{subject_short}': 'Reunion_equipe',
+      '{sender_email}': isSent ? 'user_example_com' : 'john_doe_example_com',
+      '{sender_name}': isSent ? 'User' : 'John_Doe',
+      '{recipient_email}': isSent ? 'jane_smith_example_com' : 'user_example_com',
+      '{recipient_name}': isSent ? 'Jane_Smith' : 'User',
+      '{year}': date.getFullYear().toString(),
+      '{month}': (date.getMonth() + 1).toString().padStart(2, '0'),
+      '{day}': date.getDate().toString().padStart(2, '0'),
+      '{hour}': date.getHours().toString().padStart(2, '0'),
+      '{minute}': date.getMinutes().toString().padStart(2, '0'),
+      '{second}': date.getSeconds().toString().padStart(2, '0'),
+      '{message_id}': 'abc12345',
+      '{importance}': 'normal',
+      '{has_attachments}': 'no-attachments',
+      '{timestamp}': Math.floor(date.getTime() / 1000).toString(),
+      '{timestamp_ms}': date.getTime().toString(),
+      '{week_day}': date.toLocaleDateString('fr-FR', { weekday: 'long' }).replace(/\s/g, '_'),
+      '{month_name}': date.toLocaleDateString('fr-FR', { month: 'long' }),
+      '{quarter}': 'Q' + Math.ceil((date.getMonth() + 1) / 3),
+      '{type_prefix}': isSent ? 'SENT' : 'RECEIVED',
+      '{direction}': isSent ? 'OUT' : 'IN'
+    };
+
+    let preview = pattern;
+    
+    // Sécuriser la boucle avec des vérifications
+    Object.entries(modules).forEach(([module, value]) => {
+      if (module && typeof module === 'string' && value != null && typeof value === 'string') {
+        try {
+          const escapedModule = module.replace(/[{}]/g, '\\$&');
+          const regex = new RegExp(escapedModule, 'g');
+          preview = preview.replace(regex, value);
+        } catch (error) {
+          console.warn('Erreur lors du remplacement du module:', module, error);
+        }
+      }
+    });
+
+    // Nettoyer le nom de fichier final
+    try {
+      return preview.replace(/[<>:"/\\|?*]/g, '_');
+    } catch (error) {
+      console.warn('Erreur lors du nettoyage du nom de fichier:', error);
+      return 'fichier_exemple';
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -536,10 +690,11 @@ const GeneralSettings = ({ isOpen, onClose, onSettingsUpdated }) => {
             {/* Left Panel - Root Folder & Email Deposit */}
             <div className="w-1/3 p-6 border-r border-gray-100 overflow-y-auto">
               <h4 className="text-lg font-semibold text-gray-900 mb-4">
-                Dossier racine
+                Configuration générale
               </h4>
               
               <div className="space-y-6">
+                {/* Dossier racine - existing code */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Emplacement des clients
@@ -569,7 +724,56 @@ const GeneralSettings = ({ isOpen, onClose, onSettingsUpdated }) => {
                   )}
                 </div>
 
-                {/* Section Dossiers de dépôt des emails */}
+                {/* Section Format des fichiers - REMPLACÉ PAR UN BOUTON */}
+                <div className="space-y-4">
+                  <h5 className="text-md font-semibold text-gray-900 flex items-center">
+                    <Description className="mr-2 text-purple-500" style={{ fontSize: 18 }} />
+                    Format et nommage des fichiers
+                  </h5>
+                  
+                  <button
+                    onClick={() => setShowFileFormatModal(true)}
+                    className="w-full p-4 border-2 border-dashed border-purple-200 hover:border-purple-300 rounded-xl transition-colors text-left group"
+                  >
+                    <div className="flex items-center">
+                      <Description className="text-purple-400 group-hover:text-purple-500 mr-3" style={{ fontSize: 24 }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 group-hover:text-purple-700">
+                          Configurer le format et nommage
+                        </p>
+                        <p className="text-sm text-gray-600 group-hover:text-purple-600">
+                          Format: {(settings.fileFormat || 'json').toUpperCase()} • 
+                          Modèles de nommage personnalisés
+                        </p>
+                      </div>
+                      <ChevronRight className="text-purple-400 group-hover:text-purple-500" style={{ fontSize: 20 }} />
+                    </div>
+                  </button>
+                  
+                  {/* Aperçu rapide des paramètres actuels */}
+                  {(settings.fileFormat || settings.filenamePattern) && (
+                    <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                      <p className="text-xs text-purple-800 font-medium mb-2">Configuration actuelle :</p>
+                      <div className="space-y-1">
+                        <p className="text-xs text-purple-700">
+                          <strong>Format :</strong> {(settings.fileFormat || 'json').toUpperCase()}
+                        </p>
+                        {settings.filenamePattern && (
+                          <p className="text-xs text-purple-700">
+                            <strong>Emails reçus :</strong> <code className="bg-purple-100 px-1 rounded">{settings.filenamePattern}</code>
+                          </p>
+                        )}
+                        {settings.filenamePatternSent && (
+                          <p className="text-xs text-purple-700">
+                            <strong>Emails envoyés :</strong> <code className="bg-purple-100 px-1 rounded">{settings.filenamePatternSent}</code>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Section Dossiers de dépôt des emails - existing code */}
                 <div className="space-y-4">
                   <h5 className="text-md font-semibold text-gray-900 flex items-center">
                     <FolderSpecial className="mr-2 text-orange-500" style={{ fontSize: 18 }} />
@@ -822,6 +1026,16 @@ const GeneralSettings = ({ isOpen, onClose, onSettingsUpdated }) => {
           </div>
         </div>
       </div>
+
+      {/* Modal de configuration du format des fichiers - AVEC CLÉ POUR ÉVITER LES RE-MOUNTS INTEMPESTIFS */}
+      {showFileFormatModal && (
+        <FileFormatSettings
+          key={fileFormatKey}
+          isOpen={showFileFormatModal}
+          onClose={() => setShowFileFormatModal(false)}
+          onSave={handleFileFormatUpdated}
+        />
+      )}
     </>
   );
 };
