@@ -351,10 +351,8 @@ function generateFilename(message, pattern, messageType = 'received', userEmail 
     
     // Appliquer le nettoyage seulement si activé
     if (cleaningSettings.enabled) {
-      // Pour chaque caractère configuré, le remplacer seulement s'il est activé
       Object.entries(cleaningSettings.charactersToClean).forEach(([char, shouldClean]) => {
         if (shouldClean) {
-          // Échapper les caractères spéciaux pour regex
           const escapedChar = char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const regex = new RegExp(escapedChar, 'g');
           cleaned = cleaned.replace(regex, cleaningSettings.replaceWith || '_');
@@ -362,7 +360,6 @@ function generateFilename(message, pattern, messageType = 'received', userEmail 
       });
     }
     
-    // Appliquer la limite de longueur si spécifiée
     if (maxLength && cleaned.length > maxLength) {
       cleaned = cleaned.substring(0, maxLength);
     }
@@ -370,7 +367,7 @@ function generateFilename(message, pattern, messageType = 'received', userEmail 
     return cleaned;
   };
   
-  // Modules disponibles avec nettoyage intelligent
+  // CORRECTION: Modules avec les vraies informations de l'email
   const modules = {
     // Date et heure (pas de nettoyage nécessaire)
     '{date}': date.toISOString().split('T')[0], // YYYY-MM-DD
@@ -389,18 +386,18 @@ function generateFilename(message, pattern, messageType = 'received', userEmail 
     '{subject}': cleanText(message.subject || 'Sans_sujet', 50),
     '{subject_short}': cleanText(message.subject || 'Sans_sujet', 20),
     
-    // Informations sur les emails (avec nettoyage intelligent)
+    // CORRECTION: Informations sur les emails avec les vraies données
     '{sender_email}': messageType === 'sent' 
       ? cleanText(userEmail) 
-      : cleanText(message.from?.emailAddress?.address || 'unknown'),
+      : cleanText(message.from?.emailAddress?.address || 'unknown_sender'),
     '{sender_name}': messageType === 'sent'
       ? 'User'
-      : cleanText(message.from?.emailAddress?.name || 'Unknown', 30),
+      : cleanText(message.from?.emailAddress?.name || message.from?.emailAddress?.address || 'Unknown_Sender', 30),
     '{recipient_email}': messageType === 'sent'
-      ? cleanText(message.toRecipients?.[0]?.emailAddress?.address || 'unknown')
+      ? cleanText(message.toRecipients?.[0]?.emailAddress?.address || 'unknown_recipient')
       : cleanText(userEmail),
     '{recipient_name}': messageType === 'sent'
-      ? cleanText(message.toRecipients?.[0]?.emailAddress?.name || 'Unknown', 30)
+      ? cleanText(message.toRecipients?.[0]?.emailAddress?.name || message.toRecipients?.[0]?.emailAddress?.address || 'Unknown_Recipient', 30)
       : 'User',
     
     // Informations techniques (avec nettoyage minimal)
@@ -428,8 +425,7 @@ function generateFilename(message, pattern, messageType = 'received', userEmail 
     filename = filename.replace(new RegExp(module.replace(/[{}]/g, '\\$&'), 'g'), value);
   });
   
-  // Nettoyage final du nom de fichier complet (seulement les caractères vraiment problématiques pour le système de fichiers)
-  // Même si l'utilisateur a désactivé le nettoyage, certains caractères doivent être nettoyés pour la compatibilité système
+  // Nettoyage final du nom de fichier complet
   const systemForbiddenChars = /[<>:"/\\|?*\x00-\x1f\x7f]/g;
   filename = filename.replace(systemForbiddenChars, cleaningSettings.replaceWith || '_');
   
@@ -1582,44 +1578,78 @@ ipcMain.handle('save-message-with-suggestion', async (event, { message }) => {
 
 // Mise à jour des handlers de sauvegarde pour utiliser les nouveaux patterns
 ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, savePathForFuture = false, isClientSelection = false, clientInfo = null }) => {
-  // ...existing code jusqu'à la création du nom de fichier...
-  
   try {
     const senderEmail = message.from?.emailAddress?.address;
     const senderName = message.from?.emailAddress?.name;
     
+    console.log('📧 Informations de l\'expéditeur:', { senderEmail, senderName });
+    
     if (!chosenPath) {
-      console.error('❌ Aucun chemin fourni');
-      return { success: false, error: 'Aucun chemin sélectionné' };
+      return { success: false, error: 'Aucun chemin spécifié' };
     }
 
     if (!message) {
-      console.error('❌ Aucun message fourni');
-      return { success: false, error: 'Aucun message à sauvegarder' };
+      return { success: false, error: 'Message manquant' };
     }
     
     // Get general settings to check for email deposit folder
     const settings = loadGeneralSettings();
+    console.log('⚙️ Paramètres chargés:', {
+      receivedEmailDepositFolder: settings.receivedEmailDepositFolder,
+      emailDepositFolder: settings.emailDepositFolder,
+      fileFormat: settings.fileFormat,
+      filenamePattern: settings.filenamePattern
+    });
     
     let finalPath = chosenPath;
     let depositFolderUsed = false;
     let depositFolderName = '';
     
-    // ...existing code pour le dossier de dépôt...
+    // CORRECTION: Logique du dossier de dépôt pour les emails reçus
+    const depositFolder = settings.receivedEmailDepositFolder || settings.emailDepositFolder;
+    if (depositFolder && depositFolder.trim() !== '') {
+      const depositPath = path.join(chosenPath, depositFolder.trim());
+      console.log('📁 Vérification du dossier de dépôt:', depositPath);
+      
+      try {
+        // Essayer de créer le dossier de dépôt
+        if (!fs.existsSync(depositPath)) {
+          fs.mkdirSync(depositPath, { recursive: true });
+          console.log('✅ Dossier de dépôt créé:', depositPath);
+        }
+        
+        // Si la création réussit, utiliser ce chemin
+        finalPath = depositPath;
+        depositFolderUsed = true;
+        depositFolderName = depositFolder.trim();
+        console.log('✅ Utilisation du dossier de dépôt:', finalPath);
+        
+      } catch (depositError) {
+        console.warn('⚠️ Impossible de créer/utiliser le dossier de dépôt:', depositError.message);
+        console.log('🔄 Sauvegarde directe dans:', chosenPath);
+        // Utiliser le chemin original si le dossier de dépôt ne peut pas être créé
+        finalPath = chosenPath;
+        depositFolderUsed = false;
+      }
+    }
     
-    // Create filename using pattern from settings
+    // CORRECTION: Générer le nom de fichier avec les vraies informations de l'email
     const pattern = settings.filenamePattern || '{date}_{time}_{subject}';
     const fileFormat = settings.fileFormat || 'json';
+    
+    // Passer les vraies informations du message à generateFilename
     const baseFilename = generateFilename(message, pattern, 'received');
     const fileName = `${baseFilename}.${fileFormat}`;
     
+    console.log('📄 Nom de fichier généré:', fileName);
+    
     const filePath = path.join(finalPath, fileName);
-    console.log('📄 Fichier à créer:', filePath);
+    console.log('📄 Chemin complet du fichier:', filePath);
     
     // Ensure directory exists
     if (!fs.existsSync(finalPath)) {
-      console.log('📁 Création du dossier:', finalPath);
       fs.mkdirSync(finalPath, { recursive: true });
+      console.log('📁 Dossier créé:', finalPath);
     }
     
     // Save file based on format
@@ -1631,29 +1661,50 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
         messageContent = JSON.stringify(message, null, 2);
         break;
       case 'txt':
-        // Format texte simple
-        messageContent = `Subject: ${message.subject || 'Sans sujet'}\n`;
-        messageContent += `From: ${message.from?.emailAddress?.name} <${message.from?.emailAddress?.address}>\n`;
-        messageContent += `To: ${message.toRecipients?.map(r => `${r.emailAddress.name} <${r.emailAddress.address}>`).join(', ')}\n`;
-        messageContent += `Date: ${new Date(message.receivedDateTime).toLocaleString('fr-FR')}\n`;
-        messageContent += `\n${message.bodyPreview || message.body?.content || 'Contenu non disponible'}`;
+        messageContent = `Sujet: ${message.subject || 'Sans sujet'}\n` +
+                        `De: ${message.from?.emailAddress?.name || 'Inconnu'} <${message.from?.emailAddress?.address || 'inconnu'}>\n` +
+                        `Date: ${new Date(message.receivedDateTime).toLocaleString('fr-FR')}\n\n` +
+                        `${message.bodyPreview || message.body?.content || 'Pas de contenu'}`;
         break;
       case 'eml':
-        // Format EML basique
-        messageContent = `Subject: ${message.subject || 'Sans sujet'}\r\n`;
-        messageContent += `From: ${message.from?.emailAddress?.address}\r\n`;
-        messageContent += `To: ${message.toRecipients?.map(r => r.emailAddress.address).join(', ')}\r\n`;
-        messageContent += `Date: ${new Date(message.receivedDateTime).toUTCString()}\r\n`;
-        messageContent += `Content-Type: text/html; charset=utf-8\r\n\r\n`;
-        messageContent += message.body?.content || message.bodyPreview || 'Contenu non disponible';
+        // Simplified EML format
+        messageContent = `From: ${message.from?.emailAddress?.address || 'unknown'}\n` +
+                        `To: ${message.toRecipients?.map(r => r.emailAddress.address).join(', ') || 'unknown'}\n` +
+                        `Subject: ${message.subject || 'No subject'}\n` +
+                        `Date: ${message.receivedDateTime}\n\n` +
+                        `${message.body?.content || message.bodyPreview || 'No content'}`;
         break;
       default:
         messageContent = JSON.stringify(message, null, 2);
     }
     
     fs.writeFileSync(filePath, messageContent, 'utf8');
+    console.log('✅ Fichier sauvegardé avec succès');
     
-    // ...existing code pour la vérification et le reste...
+    // Si savePathForFuture est activé, enregistrer cet expéditeur
+    if (savePathForFuture && senderEmail && senderName) {
+      console.log('💾 Sauvegarde du chemin pour le futur:', { senderEmail, senderName, chosenPath });
+      try {
+        const paths = loadSenderPaths();
+        const now = new Date().toISOString();
+        
+        const pathChanged = paths[senderEmail] && paths[senderEmail].folder_path !== chosenPath;
+        
+        paths[senderEmail] = {
+          sender_email: senderEmail,
+          sender_name: senderName,
+          folder_path: chosenPath, // Sauvegarder le chemin de base, pas le chemin avec dossier de dépôt
+          created_at: paths[senderEmail]?.created_at || now,
+          updated_at: now
+        };
+        
+        saveSenderPaths(paths);
+        console.log('✅ Chemin sauvegardé pour l\'expéditeur');
+        
+      } catch (pathError) {
+        console.error('❌ Erreur lors de la sauvegarde du chemin:', pathError);
+      }
+    }
     
     const result = { 
       success: true, 
@@ -1822,6 +1873,7 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
     }
     
     const settings = loadGeneralSettings();
+    console.log("settings: ", settings)
     let finalPath = chosenPath;
     let depositFolderUsed = false;
     let depositFolderName = '';

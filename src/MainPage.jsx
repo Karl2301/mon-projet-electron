@@ -268,79 +268,93 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   };
 
   const checkSenderPath = async (message) => {
-    // CORRECTION : Adapter selon le type d'onglet
-    let contactEmail, contactName;
-    
-    if (currentTab === 'sent') {
-      // Pour les emails envoyés, vérifier le destinataire
-      contactEmail = message.toRecipients?.[0]?.emailAddress?.address;
-      contactName = message.toRecipients?.[0]?.emailAddress?.name;
-    } else {
-      // Pour les emails reçus, vérifier l'expéditeur
-      contactEmail = message.from?.emailAddress?.address;
-      contactName = message.from?.emailAddress?.name;
-    }
-    
-    if (!contactEmail) return true;
+  // CORRECTION : Adapter selon le type d'onglet
+  let contactEmail, contactName, contactType;
+  
+  if (currentTab === 'sent') {
+    // Pour les emails envoyés, vérifier le destinataire
+    contactEmail = message.toRecipients?.[0]?.emailAddress?.address;
+    contactName = message.toRecipients?.[0]?.emailAddress?.name;
+    contactType = 'destinataire';
+  } else {
+    // Pour les emails reçus, vérifier l'expéditeur
+    contactEmail = message.from?.emailAddress?.address;
+    contactName = message.from?.emailAddress?.name;
+    contactType = 'expéditeur';
+  }
+  
+  if (!contactEmail) {
+    console.warn('Aucun email de contact trouvé pour le message');
+    return true;
+  }
 
-    try {
-      const contactPath = await window.electronAPI.getSenderPath(contactEmail);
-      if (!contactPath) {
-        setCurrentSender({
-          email: contactEmail,
-          name: contactName
-        });
-        setShowSenderModal(true);
-        
-        const contactType = currentTab === 'sent' ? 'destinataire' : 'expéditeur';
-        warning('Configuration requise', {
-          title: `Nouveau ${contactType}`,
-          details: `Veuillez configurer un dossier pour ${contactName || contactEmail}`
-        });
-        return false;
-      }
-      return true;
-    } catch (checkError) {
-      console.error('Erreur lors de la vérification du chemin:', checkError);
+  try {
+    const contactPath = await window.electronAPI.getSenderPath(contactEmail);
+    if (!contactPath) {
+      console.log(`🆕 Nouveau ${contactType} détecté:`, { contactEmail, contactName });
+      
+      setCurrentSender({
+        email: contactEmail,
+        name: contactName
+      });
+      setShowSenderModal(true);
+      
+      warning('Configuration requise', {
+        title: `Nouveau ${contactType}`,
+        details: `Veuillez configurer un dossier pour ${contactName || contactEmail}`
+      });
       return false;
     }
-  };
+    
+    console.log(`✅ ${contactType} déjà configuré:`, contactPath);
+    return true;
+  } catch (checkError) {
+    console.error('Erreur lors de la vérification du chemin:', checkError);
+    return false;
+  }
+};
 
   const handleMessageClick = async (message) => {
-    setSelectedMessage(message);
-    await checkSenderPath(message);
-  };
+  setSelectedMessage(message);
+  
+  // Vérifier automatiquement si le correspondant est configuré
+  await checkSenderPath(message);
+};
 
   const handleSaveSenderPath = async (senderData) => {
-    try {
-      const paths = await window.electronAPI.getAllSenderPaths();
-      const existingPath = paths.find(p => p.sender_email === senderData.senderEmail);
+  try {
+    const paths = await window.electronAPI.getAllSenderPaths();
+    const existingPath = paths.find(p => p.sender_email === senderData.senderEmail);
+    
+    if (existingPath) {
+      // Contact existant, mettre à jour
+      await window.electronAPI.updateSenderPath(senderData);
       
-      if (existingPath) {
-        // Expéditeur existant, mettre à jour
-        await window.electronAPI.updateSenderPath(senderData);
-        success('Chemin mis à jour', {
-          title: 'Expéditeur configuré'
-        });
-      } else {
-        // Nouvel expéditeur, sauvegarder directement
-        await window.electronAPI.setSenderPath(senderData);
-        success('Nouvel expéditeur configuré avec succès', {
-          title: 'Expéditeur ajouté',
-          details: `Dossier : ${senderData.folderPath}`
-        });
-      }
+      const contactType = currentTab === 'sent' ? 'destinataire' : 'expéditeur';
+      success('Chemin mis à jour', {
+        title: `${contactType.charAt(0).toUpperCase() + contactType.slice(1)} configuré`
+      });
+    } else {
+      // Nouveau contact, sauvegarder directement
+      await window.electronAPI.setSenderPath(senderData);
       
-      setCurrentSender(null);
-      setShowSenderModal(false);
-      await handlePathsUpdated();
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde:', error);
-      error('Erreur lors de la sauvegarde', {
-        title: 'Erreur'
+      const contactType = currentTab === 'sent' ? 'destinataire' : 'expéditeur';
+      success(`Nouveau ${contactType} configuré avec succès`, {
+        title: `${contactType.charAt(0).toUpperCase() + contactType.slice(1)} ajouté`,
+        details: `Dossier : ${senderData.folderPath}`
       });
     }
-  };
+    
+    setCurrentSender(null);
+    setShowSenderModal(false);
+    await handlePathsUpdated();
+  } catch (error) {
+    console.error('Erreur lors de la sauvegarde:', error);
+    error('Erreur lors de la sauvegarde', {
+      title: 'Erreur'
+    });
+  }
+};
 
   const startAuth = async () => {
     info('Demande d\'authentification en cours...', {
@@ -389,98 +403,105 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   };
 
   const saveMessage = async (message) => {
-    try {
-      // CORRECTION : Adapter selon le type d'onglet
-      let contactEmail, contactName;
-      
-      if (currentTab === 'sent') {
-        // Pour les emails envoyés, utiliser le destinataire
-        contactEmail = message.toRecipients?.[0]?.emailAddress?.address;
-        contactName = message.toRecipients?.[0]?.emailAddress?.name;
-      } else {
-        // Pour les emails reçus, utiliser l'expéditeur
-        contactEmail = message.from?.emailAddress?.address;
-        contactName = message.from?.emailAddress?.name;
-      }
-      
-      if (!contactEmail) {
-        error('Erreur lors de la sauvegarde', {
-          title: 'Email invalide',
-          details: 'Impossible de déterminer le contact du message'
-        });
-        return;
-      }
-
-      // Vérifier le chemin du contact
-      const contactPath = await window.electronAPI.getSenderPath(contactEmail);
-      if (!contactPath) {
-        const contactType = currentTab === 'sent' ? 'destinataire' : 'expéditeur';
-        warning('Configuration requise', {
-          title: 'Dossier non configuré',
-          details: `Veuillez d'abord configurer un dossier pour ce ${contactType} : ${contactName || contactEmail}`
-        });
-        await checkSenderPath(message);
-        return;
-      }
-
-      // Afficher une notification de début
-      info('Sauvegarde en cours...', {
-        title: 'Sauvegarde du message'
-      });
-
-      // Utiliser la fonction appropriée selon le type de message
-      let result;
-      if (currentTab === 'sent') {
-        result = await window.electronAPI.saveSentMessage({
-          message: message,
-          senderPath: contactPath.folder_path,
-          recipientEmail: contactEmail,
-          recipientName: contactPath.sender_name || contactName
-        });
-      } else {
-        result = await window.electronAPI.saveMessage({
-          message: message,
-          senderPath: contactPath.folder_path,
-          senderEmail: contactEmail,
-          senderName: contactPath.sender_name || contactName
-        });
-      }
-      
-      if (result.success) {
-        const messageType = currentTab === 'sent' ? 'envoyé' : 'reçu';
-        success(`Message ${messageType} sauvegardé avec succès`, {
-          title: 'Sauvegarde terminée',
-          details: result.fileName || 'Fichier sauvegardé'
-        });
-      } else {
-        error('Erreur lors de la sauvegarde', {
-          title: 'Erreur de fichier',
-          details: result.error || 'Erreur inconnue lors de la sauvegarde'
-        });
-      }
-    } catch (saveError) {
-      console.error('Erreur lors de la sauvegarde:', saveError);
-      
-      let errorMessage = 'Erreur inconnue';
-      if (saveError.message) {
-        errorMessage = saveError.message;
-      } else if (typeof saveError === 'string') {
-        errorMessage = saveError;
-      }
-      
+  try {
+    // CORRECTION : Adapter selon le type d'onglet
+    let contactEmail, contactName, contactType;
+    
+    if (currentTab === 'sent') {
+      // Pour les emails envoyés, utiliser le destinataire
+      contactEmail = message.toRecipients?.[0]?.emailAddress?.address;
+      contactName = message.toRecipients?.[0]?.emailAddress?.name;
+      contactType = 'destinataire';
+    } else {
+      // Pour les emails reçus, utiliser l'expéditeur
+      contactEmail = message.from?.emailAddress?.address;
+      contactName = message.from?.emailAddress?.name;
+      contactType = 'expéditeur';
+    }
+    
+    if (!contactEmail) {
       error('Erreur lors de la sauvegarde', {
-        title: 'Erreur système',
-        details: errorMessage
+        title: 'Email invalide',
+        details: 'Impossible de déterminer le contact du message'
+      });
+      return;
+    }
+
+    // Vérifier le chemin du contact
+    const contactPath = await window.electronAPI.getSenderPath(contactEmail);
+    if (!contactPath) {
+      warning('Configuration requise', {
+        title: 'Dossier non configuré',
+        details: `Veuillez d'abord configurer un dossier pour ce ${contactType} : ${contactName || contactEmail}`
+      });
+      await checkSenderPath(message);
+      return;
+    }
+
+    // Afficher une notification de début
+    info('Sauvegarde en cours...', {
+      title: 'Sauvegarde du message'
+    });
+
+    // Utiliser la fonction appropriée selon le type de message
+    let result;
+    if (currentTab === 'sent') {
+      result = await window.electronAPI.saveSentMessage({
+        message: message,
+        senderPath: contactPath.folder_path,
+        recipientEmail: contactEmail,
+        recipientName: contactPath.sender_name || contactName
+      });
+    } else {
+      result = await window.electronAPI.saveMessage({
+        message: message,
+        senderPath: contactPath.folder_path,
+        senderEmail: contactEmail,
+        senderName: contactPath.sender_name || contactName
       });
     }
-  };
+    
+    if (result.success) {
+      const messageType = currentTab === 'sent' ? 'envoyé' : 'reçu';
+      success(`Message ${messageType} sauvegardé avec succès`, {
+        title: 'Sauvegarde terminée',
+        details: result.fileName || 'Fichier sauvegardé'
+      });
+    } else {
+      error('Erreur lors de la sauvegarde', {
+        title: 'Erreur de fichier',
+        details: result.error || 'Erreur inconnue lors de la sauvegarde'
+      });
+    }
+  } catch (saveError) {
+    console.error('Erreur lors de la sauvegarde:', saveError);
+    
+    let errorMessage = 'Erreur inconnue';
+    if (saveError.message) {
+      errorMessage = saveError.message;
+    } else if (typeof saveError === 'string') {
+      errorMessage = saveError;
+    }
+    
+    error('Erreur lors de la sauvegarde', {
+      title: 'Erreur système',
+      details: errorMessage
+    });
+  }
+};
 
 
-  const getSenderPathInfo = (contactEmail) => {
-    // Pour les emails reçus : chercher l'expéditeur
-    // Pour les emails envoyés : chercher le destinataire
-    return senderPaths[contactEmail] || null;
-  };
+  const getSenderPathInfo = (message, tab) => {
+  if (tab === 'sent') {
+    // Pour les emails envoyés, chercher le destinataire
+    const recipientEmail = message.toRecipients?.[0]?.emailAddress?.address;
+    return senderPaths[recipientEmail] || null;
+  } else {
+    // Pour les emails reçus, chercher l'expéditeur
+    const senderEmail = message.from?.emailAddress?.address;
+    return senderPaths[senderEmail] || null;
+  }
+};
 
   const getCorrespondentInfo = (message, tab) => {
     if (tab === 'sent') {
@@ -963,11 +984,12 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                                     {message.hasAttachments && (
                                       <Attachment className="text-gray-400 mr-1" style={{ fontSize: 16 }} />
                                     )}
-                                    {correspondentInfo.pathInfo && (
+                                    {/* CORRECTION: Utiliser getSenderPathInfo avec le type d'onglet */}
+                                    {getSenderPathInfo(message, currentTab) && (
                                       <FolderSpecial 
                                         className="text-green-500" 
                                         style={{ fontSize: 16 }} 
-                                        title={`Correspondant configuré : ${getBasename(correspondentInfo.pathInfo.folder_path)}`} 
+                                        title={`Correspondant configuré : ${getBasename(getSenderPathInfo(message, currentTab).folder_path)}`} 
                                       />
                                     )}
                                   </div>
