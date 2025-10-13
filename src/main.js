@@ -1120,10 +1120,13 @@ ipcMain.handle('outlook:get-messages', async (event, { accessToken, top = 50, fi
   const token = accessToken || (tokenStore && tokenStore.access_token);
   if (!token) throw new Error('No access token available');
 
-  let url = `https://graph.microsoft.com/v1.0/me/messages?$top=${top}`;
+  // CORRECTION: Filtrer pour ne récupérer que les messages reçus (Inbox)
+  let url = `https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=${top}`;
   if (filter) {
     url += `&$filter=${encodeURIComponent(filter)}`;
   }
+  // Ajouter l'orderby pour avoir les emails les plus récents en premier
+  url += '&$orderby=receivedDateTime desc';
 
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -1142,7 +1145,7 @@ ipcMain.handle('outlook:get-messages', async (event, { accessToken, top = 50, fi
   return data;
 });
 
-// Enhanced messages handler with pagination and content cleaning
+// Dans le handler 'outlook:get-messages-paginated'
 ipcMain.handle('outlook:get-messages-paginated', async (event, { accessToken, top = 25, skip = 0, nextUrl = null, filter = null }) => {
   const token = accessToken || (tokenStore && tokenStore.access_token);
   if (!token) throw new Error('No access token available');
@@ -1154,8 +1157,8 @@ ipcMain.handle('outlook:get-messages-paginated', async (event, { accessToken, to
     if (nextUrl) {
       url = nextUrl;
     } else {
-      // Sinon, construire l'URL avec les paramètres
-      url = `https://graph.microsoft.com/v1.0/me/messages?$top=${top}&$skip=${skip}`;
+      // CORRECTION: Utiliser Inbox au lieu de me/messages
+      url = `https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=${top}&$skip=${skip}`;
       if (filter) {
         url += `&$filter=${encodeURIComponent(filter)}`;
       }
@@ -1197,7 +1200,8 @@ ipcMain.handle('outlook:get-messages-cached', async (event, { accessToken, top =
   if (!token) throw new Error('No access token available');
 
   try {
-    let url = `https://graph.microsoft.com/v1.0/me/messages?$top=${top}`;
+    // CORRECTION: Utiliser Inbox au lieu de me/messages
+    let url = `https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=${top}`;
     if (filter) {
       url += `&$filter=${encodeURIComponent(filter)}`;
     }
@@ -1209,17 +1213,6 @@ ipcMain.handle('outlook:get-messages-cached', async (event, { accessToken, top =
     });
     
     if (!res.ok) {
-      // Si l'API échoue et que le cache est autorisé, retourner les messages mis en cache
-      if (useCache) {
-        const cachedMessages = loadCachedMessages();
-        if (cachedMessages.length > 0) {
-          return {
-            value: cleanMessages(cachedMessages), // Clean cached messages too
-            fromCache: true,
-            error: 'API unavailable, showing cached data'
-          };
-        }
-      }
       const txt = await res.text();
       throw new Error('Graph request failed: ' + txt);
     }
@@ -1243,13 +1236,16 @@ ipcMain.handle('outlook:get-messages-cached', async (event, { accessToken, top =
   } catch (error) {
     // En cas d'erreur, essayer de retourner les données mises en cache
     if (useCache) {
-      const cachedMessages = loadCachedMessages();
-      if (cachedMessages.length > 0) {
-        return {
-          value: cleanMessages(cachedMessages), // Clean cached messages too
-          fromCache: true,
-          error: error.message
-        };
+      try {
+        const cachedMessages = loadCachedMessages();
+        if (cachedMessages && cachedMessages.length > 0) {
+          return {
+            value: cachedMessages.slice(0, top),
+            fromCache: true
+          };
+        }
+      } catch (cacheError) {
+        console.error('Error loading cached messages:', cacheError);
       }
     }
     throw error;

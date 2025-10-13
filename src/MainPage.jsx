@@ -810,7 +810,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                   </button>
                 ) : (
                   <>
-                    {currentTab === 'sent' ? 'Vos mails envoyés' : 'Vos mails non-lus'}
+                    {currentTab === 'sent' ? 'Vos emails envoyés' : 'Vos emails reçus'}
                     <span className="text-blue-600 font-medium"> avec sauvegarde automatique</span>
                   </>
                 )}
@@ -973,9 +973,15 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                   <h3 className="text-xl font-semibold text-gray-900">
                     {currentTab === 'sent' 
                       ? `Messages envoyés (${sentMessages.length})` 
-                      : `Messages non-lus (${messages.length})`
+                      : `Messages reçus (${messages.length})`
                     }
                   </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {currentTab === 'sent'
+                      ? 'Emails que vous avez envoyés'
+                      : 'Emails reçus dans votre boîte de réception'
+                    }
+                  </p>
                 </div>
 
                 {/* Liste des messages */}
@@ -988,12 +994,12 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                         <Email className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
                       )}
                       <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                        {currentTab === 'sent' ? 'Aucun message envoyé' : 'Aucun message non-lu'}
+                        {currentTab === 'sent' ? 'Aucun message envoyé' : 'Aucun message reçu'}
                       </h3>
                       <p className="text-gray-600">
                         {currentTab === 'sent' 
                           ? 'Vos messages envoyés apparaîtront ici' 
-                          : 'Tous vos messages ont été lus'
+                          : 'Vos messages reçus apparaîtront ici'
                         }
                       </p>
                     </div>
@@ -1013,9 +1019,16 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                             <div className="flex items-start justify-between">
                               <div className="flex-1 min-w-0 pr-4">
                                 <div className="flex items-center mb-2">
-                                  <div className={`w-2 h-2 rounded-full mr-3 flex-shrink-0 ${
-                                    currentTab === 'sent' ? 'bg-green-500' : 'bg-blue-500'
-                                  }`}></div>
+                                  {/* Afficher le point bleu seulement si le message n'est pas lu */}
+                                  {!message.isRead && (
+                                    <div className={`w-2 h-2 rounded-full mr-3 flex-shrink-0 ${
+                                      currentTab === 'sent' ? 'bg-green-500' : 'bg-blue-500'
+                                    }`}></div>
+                                  )}
+                                  {/* Ajout d'un espace équivalent si le message est lu pour maintenir l'alignement */}
+                                  {message.isRead && (
+                                    <div className="w-2 h-2 mr-3 flex-shrink-0"></div>
+                                  )}
                                   <p className="font-semibold text-gray-900 truncate flex-1">
                                     {currentTab === 'sent' 
                                       ? `À: ${correspondentInfo.name || correspondentInfo.email}` 
