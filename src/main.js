@@ -738,6 +738,177 @@ app.on('window-all-closed', () => {
 
 // === IPC HANDLERS ===
 
+// NOUVEAU: Fonction pour obtenir la liste des dossiers Outlook
+ipcMain.handle('outlook:get-folders', async (event, { accessToken }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) {
+    throw new Error('Token d\'accès requis');
+  }
+
+  try {
+    const res = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    
+    if (!res.ok) {
+      throw new Error(`Erreur API: ${res.status}`);
+    }
+    
+    const data = await res.json();
+    console.log('📁 Dossiers Outlook récupérés:', data.value?.length);
+    
+    return {
+      success: true,
+      folders: data.value || []
+    };
+  } catch (error) {
+    console.error('❌ Erreur lors de la récupération des dossiers:', error);
+    return {
+      success: false,
+      error: error.message,
+      folders: []
+    };
+  }
+});
+
+// NOUVEAU: Fonction pour créer un dossier "EmailManager Filed" s'il n'existe pas
+ipcMain.handle('outlook:create-filed-folder', async (event, { accessToken, folderName = 'EmailManager Filed' }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) {
+    throw new Error('Token d\'accès requis');
+  }
+
+  try {
+    // D'abord, vérifier si le dossier existe déjà
+    const foldersResult = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    
+    if (foldersResult.ok) {
+      const foldersData = await foldersResult.json();
+      const existingFolder = foldersData.value?.find(folder => folder.displayName === folderName);
+      
+      if (existingFolder) {
+        console.log('📁 Dossier déjà existant:', folderName);
+        return {
+          success: true,
+          folder: existingFolder,
+          created: false
+        };
+      }
+    }
+
+    // Créer le dossier s'il n'existe pas
+    const createRes = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        displayName: folderName
+      })
+    });
+    
+    if (!createRes.ok) {
+      throw new Error(`Erreur lors de la création du dossier: ${createRes.status}`);
+    }
+    
+    const newFolder = await createRes.json();
+    console.log('✅ Dossier créé:', folderName);
+    
+    return {
+      success: true,
+      folder: newFolder,
+      created: true
+    };
+  } catch (error) {
+    console.error('❌ Erreur lors de la création du dossier:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// NOUVEAU: Fonction pour déplacer un email vers un dossier spécifique
+ipcMain.handle('outlook:move-message', async (event, { accessToken, messageId, targetFolderId }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) {
+    throw new Error('Token d\'accès requis');
+  }
+
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${messageId}/move`, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        destinationId: targetFolderId
+      })
+    });
+    
+    if (!res.ok) {
+      throw new Error(`Erreur lors du déplacement: ${res.status}`);
+    }
+    
+    const movedMessage = await res.json();
+    console.log('✅ Email déplacé avec succès');
+    
+    return {
+      success: true,
+      movedMessage: movedMessage
+    };
+  } catch (error) {
+    console.error('❌ Erreur lors du déplacement de l\'email:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
+// NOUVEAU: Fonction pour marquer un email comme lu
+ipcMain.handle('outlook:mark-as-read', async (event, { accessToken, messageId }) => {
+  const token = accessToken || (tokenStore && tokenStore.access_token);
+  if (!token) {
+    throw new Error('Token d\'accès requis');
+  }
+
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${messageId}`, {
+      method: 'PATCH',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        isRead: true
+      })
+    });
+    
+    if (!res.ok) {
+      throw new Error(`Erreur lors du marquage: ${res.status}`);
+    }
+    
+    const updatedMessage = await res.json();
+    console.log('✅ Email marqué comme lu');
+    
+    return {
+      success: true,
+      updatedMessage: updatedMessage
+    };
+  } catch (error) {
+    console.error('❌ Erreur lors du marquage de l\'email:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+});
+
 // Dialog handlers
 ipcMain.handle('dialog:select-folder', async (event) => {
   const result = await dialog.showOpenDialog({
@@ -945,7 +1116,7 @@ ipcMain.handle('auth:refresh-google-token', async (event, refreshToken) => {
 });
 
 // Messages handlers
-ipcMain.handle('outlook:get-messages', async (event, { accessToken, top = 25, filter = null }) => {
+ipcMain.handle('outlook:get-messages', async (event, { accessToken, top = 50, filter = null }) => {
   const token = accessToken || (tokenStore && tokenStore.access_token);
   if (!token) throw new Error('No access token available');
 
@@ -1576,13 +1747,19 @@ ipcMain.handle('save-message-with-suggestion', async (event, { message }) => {
   }
 });
 
-// Mise à jour des handlers de sauvegarde pour utiliser les nouveaux patterns
-ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, savePathForFuture = false, isClientSelection = false, clientInfo = null }) => {
+// CORRECTION: Handler save-message-to-path avec logs détaillés et gestion d'erreurs
+ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, savePathForFuture = false, isClientSelection = false, clientInfo = null, outlookActions = {} }) => {
   try {
     const senderEmail = message.from?.emailAddress?.address;
     const senderName = message.from?.emailAddress?.name;
     
-    console.log('📧 Informations de l\'expéditeur:', { senderEmail, senderName });
+    console.log('📧 Début de sauvegarde avec actions Outlook:', {
+      senderEmail,
+      senderName,
+      outlookActions,
+      messageId: message.id,
+      hasToken: !!tokenStore?.access_token
+    });
     
     if (!chosenPath) {
       return { success: false, error: 'Aucun chemin spécifié' };
@@ -1592,70 +1769,51 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
       return { success: false, error: 'Message manquant' };
     }
     
-    // Get general settings to check for email deposit folder
+    // === PARTIE SAUVEGARDE LOCALE (identique) ===
     const settings = loadGeneralSettings();
-    console.log('⚙️ Paramètres chargés:', {
-      receivedEmailDepositFolder: settings.receivedEmailDepositFolder,
-      emailDepositFolder: settings.emailDepositFolder,
-      fileFormat: settings.fileFormat,
-      filenamePattern: settings.filenamePattern
-    });
-    
     let finalPath = chosenPath;
     let depositFolderUsed = false;
     let depositFolderName = '';
     
-    // CORRECTION: Logique du dossier de dépôt pour les emails reçus
     const depositFolder = settings.receivedEmailDepositFolder || settings.emailDepositFolder;
     if (depositFolder && depositFolder.trim() !== '') {
       const depositPath = path.join(chosenPath, depositFolder.trim());
-      console.log('📁 Vérification du dossier de dépôt:', depositPath);
+      console.log('📁 Tentative création dossier de dépôt:', depositPath);
       
       try {
-        // Essayer de créer le dossier de dépôt
         if (!fs.existsSync(depositPath)) {
           fs.mkdirSync(depositPath, { recursive: true });
           console.log('✅ Dossier de dépôt créé:', depositPath);
         }
         
-        // Si la création réussit, utiliser ce chemin
         finalPath = depositPath;
         depositFolderUsed = true;
         depositFolderName = depositFolder.trim();
         console.log('✅ Utilisation du dossier de dépôt:', finalPath);
         
       } catch (depositError) {
-        console.warn('⚠️ Impossible de créer/utiliser le dossier de dépôt:', depositError.message);
-        console.log('🔄 Sauvegarde directe dans:', chosenPath);
-        // Utiliser le chemin original si le dossier de dépôt ne peut pas être créé
+        console.error('❌ Erreur création dossier de dépôt:', depositError);
         finalPath = chosenPath;
         depositFolderUsed = false;
       }
     }
     
-    // CORRECTION: Générer le nom de fichier avec les vraies informations de l'email
     const pattern = settings.filenamePattern || '{date}_{time}_{subject}';
     const fileFormat = settings.fileFormat || 'json';
     
-    // Passer les vraies informations du message à generateFilename
     const baseFilename = generateFilename(message, pattern, 'received');
     const fileName = `${baseFilename}.${fileFormat}`;
     
-    console.log('📄 Nom de fichier généré:', fileName);
-    
     const filePath = path.join(finalPath, fileName);
-    console.log('📄 Chemin complet du fichier:', filePath);
+    console.log('💾 Chemin final de sauvegarde:', filePath);
     
-    // Ensure directory exists
     if (!fs.existsSync(finalPath)) {
+      console.log('📁 Création du dossier final:', finalPath);
       fs.mkdirSync(finalPath, { recursive: true });
-      console.log('📁 Dossier créé:', finalPath);
     }
     
-    // Save file based on format
-    console.log('💾 Écriture du fichier...');
+    // Sauvegarder le fichier
     let messageContent;
-    
     switch (fileFormat) {
       case 'json':
         messageContent = JSON.stringify(message, null, 2);
@@ -1667,7 +1825,6 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
                         `${message.bodyPreview || message.body?.content || 'Pas de contenu'}`;
         break;
       case 'eml':
-        // Simplified EML format
         messageContent = `From: ${message.from?.emailAddress?.address || 'unknown'}\n` +
                         `To: ${message.toRecipients?.map(r => r.emailAddress.address).join(', ') || 'unknown'}\n` +
                         `Subject: ${message.subject || 'No subject'}\n` +
@@ -1679,21 +1836,215 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
     }
     
     fs.writeFileSync(filePath, messageContent, 'utf8');
-    console.log('✅ Fichier sauvegardé avec succès');
+    console.log('✅ Fichier sauvegardé localement à:', filePath);
     
-    // Si savePathForFuture est activé, enregistrer cet expéditeur
+    // === ACTIONS OUTLOOK AVEC LOGS DÉTAILLÉS ===
+    let outlookActionsResult = {
+      movePerformed: false,
+      markAsReadPerformed: false,
+      folderCreated: false,
+      targetFolder: null,
+      errors: []
+    };
+
+    // Vérifier si les actions Outlook sont demandées
+    console.log('🔍 Vérification des conditions Outlook:', {
+      hasToken: !!tokenStore?.access_token,
+      moveToFiledRequested: outlookActions.moveToFiled,
+      markAsReadRequested: outlookActions.markAsRead,
+      tokenStoreContent: tokenStore ? 'présent' : 'absent'
+    });
+
+    if (tokenStore?.access_token && (outlookActions.moveToFiled || outlookActions.markAsRead)) {
+      console.log('🔄 Début des actions Outlook...');
+      
+      try {
+        // Action 1: Déplacer vers le dossier "Filed"
+        if (outlookActions.moveToFiled) {
+          console.log('📁 Étape 1: Recherche des dossiers existants...');
+          
+          const foldersResponse = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders', {
+            headers: { 
+              'Authorization': `Bearer ${tokenStore.access_token}`,
+              'Content-Type': 'application/json'
+            },
+          });
+          
+          console.log('📁 Réponse API dossiers:', {
+            status: foldersResponse.status,
+            statusText: foldersResponse.statusText,
+            ok: foldersResponse.ok
+          });
+          
+          if (!foldersResponse.ok) {
+            const errorText = await foldersResponse.text();
+            console.error('❌ Erreur récupération dossiers:', {
+              status: foldersResponse.status,
+              error: errorText
+            });
+            throw new Error(`Erreur récupération dossiers: ${foldersResponse.status} - ${errorText}`);
+          }
+          
+          const foldersData = await foldersResponse.json();
+          console.log('📁 Dossiers récupérés:', {
+            count: foldersData.value?.length,
+            folderNames: foldersData.value?.map(f => f.displayName)
+          });
+          
+          let targetFolder = foldersData.value?.find(folder => 
+            folder.displayName === 'EmailManager Filed' || 
+            folder.displayName === 'Filed Items'
+          );
+          
+          console.log('📁 Dossier cible trouvé:', targetFolder ? targetFolder.displayName : 'Aucun');
+          
+          // Créer le dossier s'il n'existe pas
+          if (!targetFolder) {
+            console.log('📁 Étape 2: Création du dossier EmailManager Filed...');
+            
+            const createPayload = {
+              displayName: 'EmailManager Filed'
+            };
+            
+            console.log('📁 Payload de création:', createPayload);
+            
+            const createResponse = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders', {
+              method: 'POST',
+              headers: { 
+                'Authorization': `Bearer ${tokenStore.access_token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(createPayload)
+            });
+            
+            console.log('📁 Réponse création dossier:', {
+              status: createResponse.status,
+              statusText: createResponse.statusText,
+              ok: createResponse.ok
+            });
+            
+            if (!createResponse.ok) {
+              const errorText = await createResponse.text();
+              console.error('❌ Erreur création dossier:', {
+                status: createResponse.status,
+                error: errorText
+              });
+              throw new Error(`Erreur création dossier: ${createResponse.status} - ${errorText}`);
+            }
+            
+            targetFolder = await createResponse.json();
+            outlookActionsResult.folderCreated = true;
+            console.log('✅ Dossier EmailManager Filed créé:', targetFolder);
+          }
+          
+          // Déplacer le message
+          if (targetFolder) {
+            console.log('📧 Étape 3: Déplacement du message...');
+            console.log('📧 Détails du déplacement:', {
+              messageId: message.id,
+              targetFolderId: targetFolder.id,
+              targetFolderName: targetFolder.displayName
+            });
+            
+            const movePayload = {
+              destinationId: targetFolder.id
+            };
+            
+            console.log('📧 Payload de déplacement:', movePayload);
+            
+            const moveResponse = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${message.id}/move`, {
+              method: 'POST',
+              headers: { 
+                'Authorization': `Bearer ${tokenStore.access_token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(movePayload)
+            });
+            
+            console.log('📧 Réponse déplacement:', {
+              status: moveResponse.status,
+              statusText: moveResponse.statusText,
+              ok: moveResponse.ok
+            });
+            
+            if (!moveResponse.ok) {
+              const errorText = await moveResponse.text();
+              console.error('❌ Erreur déplacement:', {
+                status: moveResponse.status,
+                error: errorText
+              });
+              throw new Error(`Erreur déplacement: ${moveResponse.status} - ${errorText}`);
+            }
+            
+            const moveResult = await moveResponse.json();
+            outlookActionsResult.movePerformed = true;
+            outlookActionsResult.targetFolder = targetFolder.displayName;
+            console.log('✅ Email déplacé avec succès:', moveResult);
+          }
+        }
+        
+        // Action 2: Marquer comme lu
+        if (outlookActions.markAsRead && !message.isRead) {
+          console.log('👁️ Étape 4: Marquage comme lu...');
+          
+          const markPayload = {
+            isRead: true
+          };
+          
+          console.log('👁️ Payload de marquage:', markPayload);
+          
+          const markResponse = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${message.id}`, {
+            method: 'PATCH',
+            headers: { 
+              'Authorization': `Bearer ${tokenStore.access_token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(markPayload)
+          });
+          
+          console.log('👁️ Réponse marquage:', {
+            status: markResponse.status,
+            statusText: markResponse.statusText,
+            ok: markResponse.ok
+          });
+          
+          if (!markResponse.ok) {
+            const errorText = await markResponse.text();
+            console.error('❌ Erreur marquage:', {
+              status: markResponse.status,
+              error: errorText
+            });
+            throw new Error(`Erreur marquage: ${markResponse.status} - ${errorText}`);
+          }
+          
+          const markResult = await markResponse.json();
+          outlookActionsResult.markAsReadPerformed = true;
+          console.log('✅ Email marqué comme lu:', markResult);
+        }
+        
+        console.log('🎉 Actions Outlook terminées avec succès:', outlookActionsResult);
+        
+      } catch (outlookError) {
+        console.error('❌ Erreur lors des actions Outlook:', outlookError);
+        outlookActionsResult.errors.push(outlookError.message);
+      }
+    } else {
+      console.log('ℹ️ Pas d\'actions Outlook:', {
+        reason: !tokenStore?.access_token ? 'Pas de token' : 'Pas d\'actions demandées',
+        outlookActions
+      });
+    }
+    
+    // Sauvegarder le chemin pour le futur si demandé
     if (savePathForFuture && senderEmail && senderName) {
-      console.log('💾 Sauvegarde du chemin pour le futur:', { senderEmail, senderName, chosenPath });
       try {
         const paths = loadSenderPaths();
         const now = new Date().toISOString();
         
-        const pathChanged = paths[senderEmail] && paths[senderEmail].folder_path !== chosenPath;
-        
         paths[senderEmail] = {
           sender_email: senderEmail,
           sender_name: senderName,
-          folder_path: chosenPath, // Sauvegarder le chemin de base, pas le chemin avec dossier de dépôt
+          folder_path: chosenPath,
           created_at: paths[senderEmail]?.created_at || now,
           updated_at: now
         };
@@ -1721,21 +2072,22 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
       basePath: chosenPath,
       messageType: 'received',
       fileFormat: fileFormat,
-      filenamePattern: pattern
+      filenamePattern: pattern,
+      outlookActions: outlookActionsResult
     };
     
-    console.log('✅ Résultat complet de la sauvegarde:', result);
+    console.log('✅ Sauvegarde complète - Résultat final:', result);
     return result;
     
   } catch (error) {
-    console.error('❌ Erreur lors de la sauvegarde dans save-message-to-path:', error);
+    console.error('❌ Erreur fatale lors de la sauvegarde:', error);
     console.error('Stack trace:', error.stack);
     return { success: false, error: error.message };
   }
 });
 
 // Messages handlers - AJOUTER SUPPORT POUR LES EMAILS ENVOYÉS
-ipcMain.handle('outlook:get-sent-messages', async (event, { accessToken, top = 25, filter = null }) => {
+ipcMain.handle('outlook:get-sent-messages', async (event, { accessToken, top = 50, filter = null }) => {
   const token = accessToken || (tokenStore && tokenStore.access_token);
   if (!token) throw new Error('No access token available');
 
@@ -1764,7 +2116,8 @@ ipcMain.handle('outlook:get-sent-messages', async (event, { accessToken, top = 2
 });
 
 // Enhanced sent messages handler with pagination
-ipcMain.handle('outlook:get-sent-messages-paginated', async (event, { accessToken, top = 25, skip = 0, nextUrl = null, filter = null }) => {
+ipcMain.handle('outlook:get-sent-messages-paginated', async (event, { accessToken, top = 50, skip = 0, nextUrl = null, filter = null }) => {
+
   const token = accessToken || (tokenStore && tokenStore.access_token);
   if (!token) throw new Error('No access token available');
 

@@ -66,6 +66,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   daemonStatus: () => ipcRenderer.invoke('daemon:status'),
   daemonConfig: (config) => ipcRenderer.invoke('daemon:config', config),
   daemonSyncNow: () => ipcRenderer.invoke('daemon:sync-now'),
+  
+  // NOUVEAU: Gestion des dossiers Outlook
+  getOutlookFolders: (params) => ipcRenderer.invoke('outlook:get-folders', params),
+  createFiledFolder: (params) => ipcRenderer.invoke('outlook:create-filed-folder', params),
+  moveMessage: (params) => ipcRenderer.invoke('outlook:move-message', params),
+  markAsRead: (params) => ipcRenderer.invoke('outlook:mark-as-read', params),
 });
 
 // AJOUTER CE LOG À LA FIN

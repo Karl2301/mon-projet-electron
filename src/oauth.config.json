@@ -1,5 +1,15 @@
 {
-  "clientId": "840bad5c-c6d4-403f-8c7f-46db5d4cf10d",
-  "tenant": "common",
-  "scopes": "offline_access Mail.Read"
+  "microsoft": {
+    "clientId": "840bad5c-c6d4-403f-8c7f-46db5d4cf10d",
+    "tenant": "common",
+    "scopes": "offline_access Mail.Read Mail.ReadWrite Mail.Send MailboxSettings.ReadWrite"
+  },
+  "google": {
+    "clientId": "550414478420-uks1ler05lu91qirgsvfsimpbbjujma8.apps.googleusercontent.com",
+    "clientSecret": "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",
+    "redirectUri": "http://localhost:63456",
+    "authEndpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+    "tokenEndpoint": "https://oauth2.googleapis.com/token",
+    "scopes": "https://www.googleapis.com/auth/gmail.readonly"
+  }
 }

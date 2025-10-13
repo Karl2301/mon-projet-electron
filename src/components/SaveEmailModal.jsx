@@ -1,4 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { 
+  Close, 
+  FolderOpen, 
+  Save,
+  Person,
+  Business,
+  Folder,
+  CreateNewFolder,
+  Check,
+  Warning,
+  Info,
+  Email, // AJOUT DE L'IMPORT MANQUANT
+  Attachment,
+  Schedule
+} from '@mui/icons-material';
 
 const SaveEmailModal = ({ 
   isOpen, 
@@ -20,6 +35,10 @@ const SaveEmailModal = ({
   const [isPathChanged, setIsPathChanged] = useState(false);
   const [originalSenderPath, setOriginalSenderPath] = useState(null);
   const [generalSettings, setGeneralSettings] = useState(null);
+  const [outlookActions, setOutlookActions] = useState({
+    moveToFiled: true,  // Par défaut, déplacer vers Filed
+    markAsRead: true    // Par défaut, marquer comme lu
+  });
 
   useEffect(() => {
     if (isOpen && message) {
@@ -168,13 +187,15 @@ const SaveEmailModal = ({
         chosenPath: pathToUse,
         savePathForFuture: shouldSaveForFuture,
         isClientSelection: activeTab === 'existing',
-        clientInfo: selectedClient
+        clientInfo: selectedClient,
+        outlookActions: outlookActions // S'assurer que ceci est inclus
       };
       
+      // Utiliser la fonction appropriée selon le type de message
       if (messageType === 'sent') {
-        result = await window.electronAPI?.saveSentMessageToPath(saveData);
+        result = await window.electronAPI.saveSentMessageToPath(saveData);
       } else {
-        result = await window.electronAPI?.saveMessageToPath(saveData);
+        result = await window.electronAPI.saveMessageToPath(saveData);
       }
       
       if (result?.success) {
@@ -546,6 +567,48 @@ const SaveEmailModal = ({
                       Le chemin de sauvegarde pour cet expéditeur sera modifié
                     </p>
                   )}
+                </div>
+              )}
+
+              {/* NOUVEAU: Options de tri Outlook */}
+              {activeTab !== 'custom' && (
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center">
+                    <Email className="mr-2 text-blue-500" style={{ fontSize: 16 }} />
+                    Actions dans Outlook
+                  </h4>
+                  
+                  <div className="space-y-3">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={outlookActions?.moveToFiled || false}
+                        onChange={(e) => setOutlookActions(prev => ({ ...prev, moveToFiled: e.target.checked }))}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">
+                        Déplacer vers "EmailManager Filed"
+                      </span>
+                    </label>
+                    
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={outlookActions?.markAsRead || false}
+                        onChange={(e) => setOutlookActions(prev => ({ ...prev, markAsRead: e.target.checked }))}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">
+                        Marquer comme lu
+                      </span>
+                    </label>
+                  </div>
+                  
+                  <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-xs text-blue-800">
+                      📁 Ces actions seront effectuées dans votre boîte Outlook après la sauvegarde locale
+                    </p>
+                  </div>
                 </div>
               )}
             </>

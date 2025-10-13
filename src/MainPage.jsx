@@ -105,7 +105,6 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
         window.electronAPI.getMessages({ 
           accessToken: token, 
           top: 50,
-          filter: "isRead eq false"
         }),
         window.electronAPI.getSentMessages({ 
           accessToken: token, 
@@ -692,10 +691,32 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   };
 
   const handleSaveComplete = (result) => {
-    console.log('🎉 handleSaveComplete avec vérification dossier dépôt:', result);
+    console.log('🎉 handleSaveComplete résultat complet:', result);
     
     if (result.success) {
       let details = `Fichier: ${result.fileName || 'Nom non défini'}`;
+      
+      // Vérifier les actions Outlook
+      if (result.outlookActions) {
+        const outlookInfo = result.outlookActions;
+        console.log('📁 Actions Outlook effectuées:', outlookInfo);
+        
+        if (outlookInfo.folderCreated) {
+          details += `\n📁 Dossier "EmailManager Filed" créé dans Outlook`;
+        }
+        
+        if (outlookInfo.movePerformed) {
+          details += `\n✅ Email déplacé vers "${outlookInfo.targetFolder}"`;
+        }
+        
+        if (outlookInfo.markAsReadPerformed) {
+          details += `\n👁️ Email marqué comme lu`;
+        }
+        
+        if (outlookInfo.errors && outlookInfo.errors.length > 0) {
+          details += `\n❌ Erreurs Outlook: ${outlookInfo.errors.join(', ')}`;
+        }
+      }
       
       // Afficher les détails selon le type de sauvegarde
       if (result.isClientSelection && result.clientName) {
@@ -751,6 +772,19 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   const handleCloseSaveModal = () => {
     setSaveModalOpen(false);
     setSelectedMessageToSave(null);
+  };
+
+  // Ajouter un bouton temporaire pour supprimer les tokens et se reconnecter
+  const handleForceReauth = async () => {
+    try {
+      await window.electronAPI.deleteTokens();
+      setTokens(null);
+      info('Tokens supprimés. Veuillez vous reconnecter.', {
+        title: 'Reconnexion requise'
+      });
+    } catch (error) {
+      console.error('Erreur lors de la suppression des tokens:', error);
+    }
   };
 
   return (
@@ -892,6 +926,14 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
               >
                 <Refresh className={`mr-2 ${loading || backgroundSync ? 'animate-spin' : ''}`} style={{ fontSize: 16 }} />
                 Actualiser manuellement
+              </button>
+
+              {/* Ajouter un bouton temporaire pour supprimer les tokens et se reconnecter */}
+              <button
+                onClick={handleForceReauth}
+                className="bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-xl border border-red-200 transition-colors inline-flex items-center text-sm"
+              >
+                🔄 Reconnecter avec nouvelles permissions
               </button>
             </div>
 

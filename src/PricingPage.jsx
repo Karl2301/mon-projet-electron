@@ -21,48 +21,70 @@ import { CheckCircle, ArrowBack, Star, Business, Bolt } from '@mui/icons-materia
 const PricingPage = ({ onSelectPlan, onBack }) => {
   const plans = [
     {
-      name: 'Starter',
-      price: '9',
-      description: 'Pour débuter',
+      name: 'Licence Solo',
+      price: '300',
+      description: '1 licence pour 1 an',
       features: [
-        '100 emails par mois',
-        '1GB de stockage',
+        'Accès complet pour 1 utilisateur',
         'Support par email',
-        'Interface basique'
+        'Mises à jour incluses',
+        'Activation immédiate'
       ],
       recommended: false,
-      accent: 'blue'
+      accent: 'blue',
+      type: "/ans",
+      devise: "€"
     },
     {
-      name: 'Professional',
-      price: '29',
-      description: 'Solution complète',
+      name: 'Pack Équipe',
+      price: '1920',
+      description: '8 licences pour 1 an (240€/licence)',
       features: [
-        'Emails illimités',
-        '10GB de stockage',
+        'Accès complet pour 8 utilisateurs',
         'Support prioritaire',
-        'Analytics avancées',
-        'Intégration API',
-        'Thèmes personnalisés'
+        'Gestion centralisée',
+        'Mises à jour incluses',
+        'Activation immédiate'
       ],
       recommended: true,
-      accent: 'indigo'
+      accent: 'indigo',
+      type: "/ans",
+      devise: "€"
     },
     {
-      name: 'Enterprise',
-      price: '99',
-      description: 'Pour les équipes',
+      name: 'Pack Entreprise',
+      price: '3150',
+      description: '15 licences pour 1 an (210€/licence)',
       features: [
-        'Toutes les fonctionnalités',
-        'Stockage illimité',
+        'Accès complet pour 15 utilisateurs',
         'Support 24/7',
         'Gestion multi-utilisateurs',
-        'Sécurité renforcée',
+        'Mises à jour incluses',
         'Formation dédiée',
-        'SLA garanti'
+        'Activation immédiate'
+      ],
+      recommended: true,
+      accent: 'emerald',
+      type: "/ans",
+      devise: "€"
+    },
+    {
+      name: 'Pack Sur Mesure',
+      price: 'Sur devis',
+      description: 'Nombre de licences personnalisé, fonctionnalités avancées',
+      features: [
+        'Accès complet pour un nombre d’utilisateurs personnalisé',
+        'Support dédié',
+        'Fonctionnalités sur mesure',
+        'Gestion avancée',
+        'Mises à jour incluses',
+        'Formation personnalisée',
+        'Activation immédiate'
       ],
       recommended: false,
-      accent: 'emerald'
+      accent: 'purple',
+      type: "",
+      devise: ""
     }
   ];
 
@@ -91,6 +113,14 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
         check: 'text-emerald-500',
         border: 'border-emerald-200',
         button: recommended ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border border-emerald-200'
+      },
+      purple: {
+        badge: 'bg-purple-600',
+        icon: 'text-purple-600',
+        iconBg: 'bg-purple-50',
+        check: 'text-purple-500',
+        border: 'border-purple-200',
+        button: recommended ? 'bg-purple-600 hover:bg-purple-700 text-white' : 'bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-200'
       }
     };
     return colors[accent];
@@ -100,7 +130,8 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
     const icons = [
       <Bolt style={{ fontSize: 20 }} />,
       <Star style={{ fontSize: 20 }} />,
-      <Business style={{ fontSize: 20 }} />
+      <Business style={{ fontSize: 20 }} />,
+      <Star style={{ fontSize: 20 }} /> // Ajout d'une 4ème icône
     ];
     return icons[index];
   };
@@ -120,7 +151,7 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
           
           <div className="text-center">
             <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl mb-6">
-              <span className="text-white text-2xl font-bold">€</span>
+              <span className="text-white text-2xl font-bold"></span>
             </div>
             <h1 className="text-4xl font-bold text-gray-900 mb-4 tracking-tight">
               Tarification
@@ -133,8 +164,8 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
       </div>
 
       {/* Cards de tarification avec couleurs */}
-      <div className="max-w-4xl mx-auto px-6 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="max-w-6xl mx-auto px-6 py-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {plans.map((plan, index) => {
             const accentClasses = getAccentClasses(plan.accent, plan.recommended);
             
@@ -157,39 +188,39 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
                 )}
                 
                 <div className="p-8 flex flex-col h-full">
-                  {/* Icône colorée */}
-                  <div className="text-center mb-6">
-                    <div className={`inline-flex items-center justify-center w-12 h-12 ${accentClasses.iconBg} rounded-xl mb-4`}>
+                  {/* Icône colorée - hauteur fixe */}
+                  <div className="text-center mb-6 h-16 flex items-center justify-center">
+                    <div className={`inline-flex items-center justify-center w-12 h-12 ${accentClasses.iconBg} rounded-xl`}>
                       <span className={accentClasses.icon}>
                         {getIcon(index)}
                       </span>
                     </div>
                   </div>
 
-                  {/* En-tête du plan */}
-                  <div className="text-center mb-8">
+                  {/* En-tête du plan - hauteur fixe */}
+                  <div className="text-center mb-1 h-32 flex flex-col justify-center">
                     <h3 className="text-xl font-bold text-gray-900 mb-2">
                       {plan.name}
                     </h3>
-                    <p className="text-gray-600 text-sm mb-6">
+                    <p className="text-gray-600 text-sm">
                       {plan.description}
                     </p>
-                    
-                    {/* Prix */}
-                    <div className="mb-6">
-                      <div className="flex items-baseline justify-center">
-                        <span className="text-4xl font-bold text-gray-900">
-                          {plan.price}€
-                        </span>
-                        <span className="text-gray-600 ml-1 font-medium">
-                          /mois
-                        </span>
-                      </div>
+                  </div>
+                  
+                  {/* Prix - hauteur fixe pour alignement */}
+                  <div className="text-center mb-8 h-20 flex items-center justify-center">
+                    <div className="flex items-baseline">
+                      <span className="text-4xl font-bold text-gray-900">
+                        {plan.price}{plan.devise}
+                      </span>
+                      <span className="text-gray-600 ml-1 font-medium">
+                        {plan.type}
+                      </span>
                     </div>
                   </div>
                   
-                  {/* Liste des fonctionnalités avec icônes colorées - flex-grow pour prendre l'espace disponible */}
-                  <div className="space-y-4 mb-8 flex-grow">
+                  {/* Liste des fonctionnalités avec hauteur minimum fixe */}
+                  <div className="space-y-4 mb-8 flex-grow min-h-[280px]">
                     {plan.features.map((feature, featureIndex) => (
                       <div key={featureIndex} className="flex items-start">
                         <div className="flex-shrink-0 mt-0.5">
