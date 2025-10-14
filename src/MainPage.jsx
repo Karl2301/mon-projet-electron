@@ -15,8 +15,9 @@ import {
   Forward,
   FolderSpecial,
   Refresh,
-  Send, // NOUVEAU
-  Inbox // NOUVEAU
+  Send,
+  Inbox,
+  Search // AJOUT MANQUANT
 } from '@mui/icons-material';
 import Navigation from './Navigation';
 import SenderPathModal from './SenderPathModal';
@@ -27,6 +28,8 @@ import ToastContainer from './ToastContainer';
 import SaveEmailModal from './components/SaveEmailModal';
 import ExternalLink from './components/ExternalLink';
 import DaemonSettings from './components/DaemonSettings';
+import EmailSearch from './components/EmailSearch'; // AJOUT
+
 
 const MainPage = ({ user, onLogout, onShowPricing }) => {
   const [deviceInfo, setDeviceInfo] = useState(null);
@@ -46,6 +49,7 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
   const [currentTab, setCurrentTab] = useState('received'); // 'received' ou 'sent'
   const [sentMessages, setSentMessages] = useState([]);
   const [loadingSent, setLoadingSent] = useState(false);
+  const [showEmailSearch, setShowEmailSearch] = useState(false); // NOUVEAU
   
   // Ajouter les états manquants
   const [senderPaths, setSenderPaths] = useState({});
@@ -787,453 +791,518 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
     }
   };
 
+  const handleSearchMessage = (message) => {
+    // Gérer la sélection d'un message depuis la recherche
+    setSelectedMessage(message);
+    
+    // Basculer vers le bon onglet selon le type de message
+    if (message.messageType === 'sent') {
+      setCurrentTab('sent');
+    } else {
+      setCurrentTab('received');
+    }
+    
+    success('Message sélectionné depuis la recherche', {
+      title: 'Navigation',
+      details: `Affichage du message: ${message.subject || 'Sans sujet'}`
+    });
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-25 via-white to-blue-25">
-      <Navigation user={user} onLogout={onLogout} onShowPricing={onShowPricing} />
-      
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Header avec status de synchronisation */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-4xl font-bold text-gray-900 mb-2 tracking-tight">
-                {selectedMessage ? 'Lecture du message' : 'Boîte de réception'}
-              </h1>
-              <p className="text-gray-600 text-lg">
-                {selectedMessage ? (
-                  <button 
-                    onClick={() => setSelectedMessage(null)}
-                    className="inline-flex items-center text-blue-600 hover:text-blue-800 transition-colors"
-                  >
-                    <ArrowBack className="mr-2" style={{ fontSize: 18 }} />
-                    Retour à la liste
-                  </button>
-                ) : (
-                  <>
-                    {currentTab === 'sent' ? 'Vos emails envoyés' : 'Vos emails reçus'}
-                    <span className="text-blue-600 font-medium"> avec sauvegarde automatique</span>
-                  </>
-                )}
-              </p>
-            </div>
-            
-            {/* Sync Status */}
-            {tokens && (
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2 bg-white rounded-lg px-4 py-2 border border-gray-200">
-                  {getSyncStatusIcon()}
-                  <div className="text-sm">
-                    <div className="font-medium text-gray-900">
-                      {getSyncStatusText()}
-                    </div>
-                    <div className="text-gray-500 text-xs">
-                      Dernière sync: {formatLastSyncTime()}
-                    </div>
-                  </div>
-                </div>
-                
-                <button
-                  onClick={handleManualSync}
-                  disabled={loading}
-                  className="p-2 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed text-blue-600 rounded-lg transition-colors"
-                  title="Synchroniser maintenant"
-                >
-                  <CloudSync className={backgroundSync ? 'animate-spin' : ''} style={{ fontSize: 20 }} />
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Stats - VERSION MISE À JOUR */}
-        {tokens && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-xl p-4 border border-gray-100">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center mr-3">
-                  <Inbox className="text-blue-600" style={{ fontSize: 18 }} />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-600">Messages reçus</p>
-                  <p className="text-lg font-bold text-gray-900">{messages.length}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-4 border border-gray-100">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center mr-3">
-                  <Send className="text-green-600" style={{ fontSize: 18 }} />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-600">Messages envoyés</p>
-                  <p className="text-lg font-bold text-gray-900">{sentMessages.length}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-4 border border-gray-100">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center mr-3">
-                  <Schedule className="text-purple-600" style={{ fontSize: 18 }} />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-600">Auto-sync</p>
-                  <p className="text-sm font-bold text-gray-900">Toutes les 5s</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-4 border border-gray-100">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-orange-50 rounded-lg flex items-center justify-center mr-3">
-                  <Folder className="text-orange-600" style={{ fontSize: 18 }} />
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-600">Status</p>
-                  <p className="text-sm font-bold text-gray-900">{getSyncStatusText()}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Interface Email */}
-        {tokens && (
-          <>
-            {/* Action buttons */}
-            <div className="flex space-x-4 mb-6">
-              <button
-                onClick={() => setShowPathsManager(true)}
-                className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
-              >
-                <SettingsIcon className="mr-2" style={{ fontSize: 16 }} />
-                Gérer les expéditeurs
-              </button>
-
-              <button
-                onClick={() => setShowDaemonSettings(true)}
-                className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
-              >
-                <CloudSync className="mr-2" style={{ fontSize: 16 }} />
-                Service d'arrière-plan
-              </button>
-              
-              <button 
-                onClick={handleManualSync}
-                disabled={loading || backgroundSync}
-                className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-xl transition-colors inline-flex items-center disabled:opacity-50 text-sm"
-              >
-                <Refresh className={`mr-2 ${loading || backgroundSync ? 'animate-spin' : ''}`} style={{ fontSize: 16 }} />
-                Actualiser manuellement
-              </button>
-
-              {/* Ajouter un bouton temporaire pour supprimer les tokens et se reconnecter */}
-              <button
-                onClick={handleForceReauth}
-                className="bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-xl border border-red-200 transition-colors inline-flex items-center text-sm"
-              >
-                🔄 Reconnecter avec nouvelles permissions
-              </button>
-            </div>
-
-            {/* Onglets pour choisir entre reçus et envoyés */}
-            <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
-              <button
-                onClick={() => setCurrentTab('received')}
-                className={`py-2 px-6 rounded-md text-sm font-medium transition-colors ${
-                  currentTab === 'received'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Inbox className="mr-2 inline" style={{ fontSize: 16 }} />
-                Messages reçus ({messages.length})
-              </button>
-              <button
-                onClick={() => setCurrentTab('sent')}
-                className={`py-2 px-6 rounded-md text-sm font-medium transition-colors ${
-                  currentTab === 'sent'
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Send className="mr-2 inline" style={{ fontSize: 16 }} />
-                Messages envoyés ({sentMessages.length})
-              </button>
-            </div>
-
-            <div className="flex gap-6 min-h-[calc(100vh-280px)]">
-              {/* Liste des emails */}
-              <div className={`bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm transition-all duration-300 ${
-                selectedMessage ? 'w-1/3' : 'w-full'
-              }`}>
-                {/* Header de la liste */}
-                <div className="p-6 border-b border-gray-100">
-                  <h3 className="text-xl font-semibold text-gray-900">
-                    {currentTab === 'sent' 
-                      ? `Messages envoyés (${sentMessages.length})` 
-                      : `Messages reçus (${messages.length})`
-                    }
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {currentTab === 'sent'
-                      ? 'Emails que vous avez envoyés'
-                      : 'Emails reçus dans votre boîte de réception'
-                    }
-                  </p>
-                </div>
-
-                {/* Liste des messages */}
-                <div className="divide-y divide-gray-100">
-                  {getCurrentMessages().length === 0 ? (
-                    <div className="p-12 text-center">
-                      {currentTab === 'sent' ? (
-                        <Send className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
-                      ) : (
-                        <Email className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
-                      )}
-                      <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                        {currentTab === 'sent' ? 'Aucun message envoyé' : 'Aucun message reçu'}
-                      </h3>
-                      <p className="text-gray-600">
-                        {currentTab === 'sent' 
-                          ? 'Vos messages envoyés apparaîtront ici' 
-                          : 'Vos messages reçus apparaîtront ici'
-                        }
-                      </p>
-                    </div>
-                  ) : (
-                    <>
-                      {getCurrentMessages().map((message) => {
-                        const correspondentInfo = getCorrespondentInfo(message, currentTab);
-                        
-                        return (
-                          <div 
-                            key={message.id}
-                            onClick={() => handleMessageClick(message)}
-                            className={`p-4 hover:bg-blue-25 cursor-pointer transition-colors duration-200 ${
-                              selectedMessage?.id === message.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : ''
-                            }`}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1 min-w-0 pr-4">
-                                <div className="flex items-center mb-2">
-                                  {/* Afficher le point bleu seulement si le message n'est pas lu */}
-                                  {!message.isRead && (
-                                    <div className={`w-2 h-2 rounded-full mr-3 flex-shrink-0 ${
-                                      currentTab === 'sent' ? 'bg-green-500' : 'bg-blue-500'
-                                    }`}></div>
-                                  )}
-                                  {/* Ajout d'un espace équivalent si le message est lu pour maintenir l'alignement */}
-                                  {message.isRead && (
-                                    <div className="w-2 h-2 mr-3 flex-shrink-0"></div>
-                                  )}
-                                  <p className="font-semibold text-gray-900 truncate flex-1">
-                                    {currentTab === 'sent' 
-                                      ? `À: ${correspondentInfo.name || correspondentInfo.email}` 
-                                      : `De: ${correspondentInfo.name || correspondentInfo.email}`
-                                    }
-                                  </p>
-                                  <div className="flex items-center ml-2 flex-shrink-0">
-                                    {message.hasAttachments && (
-                                      <Attachment className="text-gray-400 mr-1" style={{ fontSize: 16 }} />
-                                    )}
-                                    {/* CORRECTION: Utiliser getSenderPathInfo avec le type d'onglet */}
-                                    {getSenderPathInfo(message, currentTab) && (
-                                      <FolderSpecial 
-                                        className="text-green-500" 
-                                        style={{ fontSize: 16 }} 
-                                        title={`Correspondant configuré : ${getBasename(getSenderPathInfo(message, currentTab).folder_path)}`} 
-                                      />
-                                    )}
-                                  </div>
-                                </div>
-                                <h4 className="font-medium text-gray-900 mb-1 truncate">
-                                  {message.subject || 'Sans sujet'}
-                                </h4>
-                                <p className="text-sm text-gray-600 line-clamp-2 break-words">
-                                  {message.bodyPreview}
-                                </p>
-                              </div>
-                              <div className="ml-4 flex-shrink-0 text-right">
-                                <p className="text-xs text-gray-500 mb-1 whitespace-nowrap">
-                                  {formatDate(currentTab === 'sent' ? message.sentDateTime : message.receivedDateTime)}
-                                </p>
-                                {message.importance === 'high' && (
-                                  <div className="w-2 h-2 bg-red-500 rounded-full ml-auto"></div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Vue détaillée du message - MISE À JOUR POUR LES ENVOYÉS */}
-              {selectedMessage && (
-                <div className="w-2/3 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm flex flex-col">
-                  {/* Header du message */}
-                  <div className="p-6 border-b border-gray-100 flex-shrink-0">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex-1 min-w-0 pr-4">
-                        <div className="flex items-center mb-2">
-                          <h2 className="text-xl font-bold text-gray-900 break-words flex-1">
-                            {selectedMessage.subject || 'Sans sujet'}
-                          </h2>
-                          {currentTab === 'sent' && (
-                            <div className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-md flex-shrink-0">
-                              Message envoyé
-                            </div>
-                          )}
-                        </div>
-                        <div className="space-y-2">
-                          {currentTab === 'sent' ? (
-                            <>
-                              <div className="flex items-start">
-                                <span className="text-xsm text-gray-500 w-16 flex-shrink-0">À:</span>
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-sm text-gray-900 font-medium break-words">
-                                    {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
-                                  </span>
-                                  {getSenderPathInfo(selectedMessage.toRecipients?.[0]?.emailAddress?.address) && (
-                                    <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
-                                      📁 Correspondant configuré
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-start">
-                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
-                                <span className="text-sm text-gray-900">
-                                  {new Date(selectedMessage.sentDateTime).toLocaleString('fr-FR')}
-                                </span>
-                              </div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="flex items-start">
-                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">De:</span>
-                                <div className="flex-1 min-w-0">
-                                  <span className="text-sm text-gray-900 font-medium break-words">
-                                    {selectedMessage.from?.emailAddress?.name || selectedMessage.from?.emailAddress?.address}
-                                  </span>
-                                  {getSenderPathInfo(selectedMessage.from?.emailAddress?.address) && (
-                                    <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
-                                      📁 Correspondant configuré
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex items-start">
-                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">À:</span>
-                                <span className="text-sm text-gray-900 break-words">
-                                  {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
-                                </span>
-                              </div>
-                              <div className="flex items-start">
-                                <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
-                                <span className="text-sm text-gray-900">
-                                  {new Date(selectedMessage.receivedDateTime).toLocaleString('fr-FR')}
-                                </span>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
-                        <button 
-                          onClick={() => handleSaveMessage(selectedMessage)}
-                          className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
-                          title="Sauvegarder le message"
-                        >
-                          <Download style={{ fontSize: 18 }} className="text-blue-600" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Contenu du message */}
-                  <div className="flex-1 p-6 overflow-y-auto">
-                    <div 
-                      className="prose prose-sm max-w-none text-gray-900 break-words message-content"
-                      dangerouslySetInnerHTML={{ 
-                        __html: selectedMessage.body?.content || selectedMessage.bodyPreview 
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Modals - MISE À JOUR POUR SUPPORTER LE TYPE DE MESSAGE */}
-      <SenderPathModal
-        isOpen={showSenderModal}
-        onClose={() => {
-          setShowSenderModal(false);
-          setCurrentSender(null);
-        }}
-        sender={currentSender}
-        onSave={handleSaveSenderPath}
-      />
-
-      <SenderPathsManager
-        isOpen={showPathsManager}
-        onClose={() => setShowPathsManager(false)}
-        onPathUpdated={handlePathsUpdated}
-      />
-
-      <GeneralSettings
-        isOpen={showGeneralSettings}
-        onClose={() => setShowGeneralSettings(false)}
-        onSettingsUpdated={(type, message, options) => {
-          if (type === 'success') {
-            success(message, options);
-          } else {
-            error(message, options);
-          }
-        }}
-      />
-
-      {/* Modal de sauvegarde */}
-      <SaveEmailModal
-        isOpen={saveModalOpen}
-        onClose={handleCloseSaveModal}
-        message={selectedMessageToSave}
-        messageType={currentTab} // Passer le type de message
-        onSave={handleSaveComplete}
-      />
-
-      {/* Daemon Settings Modal */}
-      <DaemonSettings
-        isOpen={showDaemonSettings}
-        onClose={() => setShowDaemonSettings(false)}
-        onNotification={(type, message, options) => {
-          if (type === 'success') {
-            success(message, options);
-          } else if (type === 'error') {
-            error(message, options);
-          } else if (type === 'info') {
-            info(message, options);
-          } else if (type === 'warning') {
-            warning(message, options);
-          }
-        }}
-      />
-
-      {/* Toast Notifications */}
+    <div className="min-h-screen bg-gray-25">
       <ToastContainer 
         notifications={notifications} 
         onRemove={removeNotification} 
       />
+
+      {/* Navigation */}
+      <Navigation 
+        user={user} 
+        onLogout={onLogout} 
+        onShowPricing={onShowPricing}
+      />
+
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Header avec Stats et Actions */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                Gestion des emails
+              </h1>
+              <p className="text-gray-600">
+                Organisez et sauvegardez vos communications
+              </p>
+            </div>
+            
+            {/* Actions principales */}
+            <div className="flex space-x-3">
+              {/* NOUVEAU: Bouton de recherche */}
+              <button
+                onClick={() => setShowEmailSearch(true)}
+                className="flex items-center space-x-2 px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 rounded-xl border border-gray-200 transition-colors shadow-sm"
+              >
+                <Search style={{ fontSize: 18 }} />
+                <span className="hidden sm:inline">Rechercher</span>
+              </button>
+
+              {/* NOUVEAU: Raccourci clavier pour la recherche */}
+              <div className="hidden lg:flex items-center text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+                <span>Ctrl+K</span>
+              </div>
+
+              {/* Bouton de synchronisation manuelle */}
+              <button
+                onClick={handleManualSync}
+                disabled={syncStatus === 'syncing'}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors shadow-sm"
+              >
+                {getSyncStatusIcon()}
+                <span className="hidden sm:inline">
+                  {syncStatus === 'syncing' ? 'Synchronisation...' : 'Synchroniser'}
+                </span>
+              </button>
+
+              {/* Bouton Daemon Settings */}
+              <button
+                onClick={() => setShowDaemonSettings(true)}
+                className="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition-colors"
+              >
+                <CloudSync style={{ fontSize: 18 }} />
+                <span className="hidden sm:inline">Service</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Stats - VERSION MISE À JOUR */}
+          {tokens && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center mr-3">
+                    <Inbox className="text-blue-600" style={{ fontSize: 18 }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-600">Messages reçus</p>
+                    <p className="text-lg font-bold text-gray-900">{messages.length}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center mr-3">
+                    <Send className="text-green-600" style={{ fontSize: 18 }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-600">Messages envoyés</p>
+                    <p className="text-lg font-bold text-gray-900">{sentMessages.length}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center mr-3">
+                    <Schedule className="text-purple-600" style={{ fontSize: 18 }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-600">Auto-sync</p>
+                    <p className="text-sm font-bold text-gray-900">Toutes les 5s</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border border-gray-100">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-orange-50 rounded-lg flex items-center justify-center mr-3">
+                    <Folder className="text-orange-600" style={{ fontSize: 18 }} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-gray-600">Status</p>
+                    <p className="text-sm font-bold text-gray-900">{getSyncStatusText()}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Interface Email */}
+          {tokens && (
+            <>
+              {/* Action buttons */}
+              <div className="flex space-x-4 mb-6">
+                <button
+                  onClick={() => setShowPathsManager(true)}
+                  className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
+                >
+                  <SettingsIcon className="mr-2" style={{ fontSize: 16 }} />
+                  Gérer les expéditeurs
+                </button>
+
+                <button
+                  onClick={() => setShowDaemonSettings(true)}
+                  className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-xl border border-gray-200 transition-colors inline-flex items-center text-sm"
+                >
+                  <CloudSync className="mr-2" style={{ fontSize: 16 }} />
+                  Service d'arrière-plan
+                </button>
+                
+                <button 
+                  onClick={handleManualSync}
+                  disabled={loading || backgroundSync}
+                  className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-xl transition-colors inline-flex items-center disabled:opacity-50 text-sm"
+                >
+                  <Refresh className={`mr-2 ${loading || backgroundSync ? 'animate-spin' : ''}`} style={{ fontSize: 16 }} />
+                  Actualiser manuellement
+                </button>
+
+                {/* Ajouter un bouton temporaire pour supprimer les tokens et se reconnecter */}
+                <button
+                  onClick={handleForceReauth}
+                  className="bg-red-50 hover:bg-red-100 text-red-700 font-medium py-2 px-4 rounded-xl border border-red-200 transition-colors inline-flex items-center text-sm"
+                >
+                  🔄 Reconnecter avec nouvelles permissions
+                </button>
+              </div>
+
+              {/* Onglets pour choisir entre reçus et envoyés */}
+              <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-lg w-fit">
+                <button
+                  onClick={() => setCurrentTab('received')}
+                  className={`py-2 px-6 rounded-md text-sm font-medium transition-colors ${
+                    currentTab === 'received'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Inbox className="mr-2 inline" style={{ fontSize: 16 }} />
+                  Messages reçus ({messages.length})
+                </button>
+                <button
+                  onClick={() => setCurrentTab('sent')}
+                  className={`py-2 px-6 rounded-md text-sm font-medium transition-colors ${
+                    currentTab === 'sent'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  <Send className="mr-2 inline" style={{ fontSize: 16 }} />
+                  Messages envoyés ({sentMessages.length})
+                </button>
+              </div>
+
+              <div className="flex gap-6 min-h-[calc(100vh-280px)]">
+                {/* Liste des emails */}
+                <div className={`bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm transition-all duration-300 ${
+                  selectedMessage ? 'w-1/3' : 'w-full'
+                }`}>
+                  {/* Header de la liste */}
+                  <div className="p-6 border-b border-gray-100">
+                    <h3 className="text-xl font-semibold text-gray-900">
+                      {currentTab === 'sent' 
+                        ? `Messages envoyés (${sentMessages.length})` 
+                        : `Messages reçus (${messages.length})`
+                    }
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      {currentTab === 'sent'
+                        ? 'Emails que vous avez envoyés'
+                        : 'Emails reçus dans votre boîte de réception'
+                      }
+                    </p>
+                  </div>
+
+                  {/* Liste des messages */}
+                  <div className="divide-y divide-gray-100">
+                    {getCurrentMessages().length === 0 ? (
+                      <div className="p-12 text-center">
+                        {currentTab === 'sent' ? (
+                          <Send className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
+                        ) : (
+                          <Email className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
+                        )}
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                          {currentTab === 'sent' ? 'Aucun message envoyé' : 'Aucun message reçu'}
+                        </h3>
+                        <p className="text-gray-600">
+                          {currentTab === 'sent' 
+                            ? 'Vos messages envoyés apparaîtront ici' 
+                            : 'Vos messages reçus apparaîtront ici'
+                          }
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {getCurrentMessages().map((message) => {
+                          const correspondentInfo = getCorrespondentInfo(message, currentTab);
+                          
+                          return (
+                            <div 
+                              key={message.id}
+                              onClick={() => handleMessageClick(message)}
+                              className={`p-4 hover:bg-blue-25 cursor-pointer transition-colors duration-200 ${
+                                selectedMessage?.id === message.id ? 'bg-blue-50 border-r-4 border-r-blue-500' : ''
+                              }`}
+                            >
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1 min-w-0 pr-4">
+                                  <div className="flex items-center mb-2">
+                                    {/* Afficher le point bleu seulement si le message n'est pas lu */}
+                                    {!message.isRead && (
+                                      <div className={`w-2 h-2 rounded-full mr-3 flex-shrink-0 ${
+                                        currentTab === 'sent' ? 'bg-green-500' : 'bg-blue-500'
+                                      }`}></div>
+                                    )}
+                                    {/* Ajout d'un espace équivalent si le message est lu pour maintenir l'alignement */}
+                                    {message.isRead && (
+                                      <div className="w-2 h-2 mr-3 flex-shrink-0"></div>
+                                    )}
+                                    <p className="font-semibold text-gray-900 truncate flex-1">
+                                      {currentTab === 'sent' 
+                                        ? `À: ${correspondentInfo.name || correspondentInfo.email}` 
+                                        : `De: ${correspondentInfo.name || correspondentInfo.email}`
+                                      }
+                                    </p>
+                                    <div className="flex items-center ml-2 flex-shrink-0">
+                                      {message.hasAttachments && (
+                                        <Attachment className="text-gray-400 mr-1" style={{ fontSize: 16 }} />
+                                      )}
+                                      {/* CORRECTION: Utiliser getSenderPathInfo avec le type d'onglet */}
+                                      {getSenderPathInfo(message, currentTab) && (
+                                        <FolderSpecial 
+                                          className="text-green-500" 
+                                          style={{ fontSize: 16 }} 
+                                          title={`Correspondant configuré : ${getBasename(getSenderPathInfo(message, currentTab).folder_path)}`} 
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+                                  <h4 className="font-medium text-gray-900 mb-1 truncate">
+                                    {message.subject || 'Sans sujet'}
+                                  </h4>
+                                  <p className="text-sm text-gray-600 line-clamp-2 break-words">
+                                    {message.bodyPreview}
+                                  </p>
+                                </div>
+                                <div className="ml-4 flex-shrink-0 text-right">
+                                  <p className="text-xs text-gray-500 mb-1 whitespace-nowrap">
+                                    {formatDate(currentTab === 'sent' ? message.sentDateTime : message.receivedDateTime)}
+                                  </p>
+                                  {message.importance === 'high' && (
+                                    <div className="w-2 h-2 bg-red-500 rounded-full ml-auto"></div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Vue détaillée du message - MISE À JOUR POUR LES ENVOYÉS */}
+                {selectedMessage && (
+                  <div className="w-2/3 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm flex flex-col">
+                    {/* Header du message */}
+                    <div className="p-6 border-b border-gray-100 flex-shrink-0">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1 min-w-0 pr-4">
+                          <div className="flex items-center mb-2">
+                            <h2 className="text-xl font-bold text-gray-900 break-words flex-1">
+                              {selectedMessage.subject || 'Sans sujet'}
+                            </h2>
+                            {currentTab === 'sent' && (
+                              <div className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-md flex-shrink-0">
+                                Message envoyé
+                              </div>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            {currentTab === 'sent' ? (
+                              <>
+                                <div className="flex items-start">
+                                  <span className="text-xsm text-gray-500 w-16 flex-shrink-0">À:</span>
+                                  <div className="flex-1 min-w-0">
+                                    <span className="text-sm text-gray-900 font-medium break-words">
+                                      {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
+                                    </span>
+                                    {getSenderPathInfo(selectedMessage.toRecipients?.[0]?.emailAddress?.address) && (
+                                      <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
+                                        📁 Correspondant configuré
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-start">
+                                  <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
+                                  <span className="text-sm text-gray-900">
+                                    {new Date(selectedMessage.sentDateTime).toLocaleString('fr-FR')}
+                                  </span>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-start">
+                                  <span className="text-sm text-gray-500 w-16 flex-shrink-0">De:</span>
+                                  <div className="flex-1 min-w-0">
+                                    <span className="text-sm text-gray-900 font-medium break-words">
+                                      {selectedMessage.from?.emailAddress?.name || selectedMessage.from?.emailAddress?.address}
+                                    </span>
+                                    {getSenderPathInfo(selectedMessage.from?.emailAddress?.address) && (
+                                      <div className="inline-block ml-2 px-2 py-1 bg-green-50 text-green-700 text-xs rounded-md">
+                                        📁 Correspondant configuré
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-start">
+                                  <span className="text-sm text-gray-500 w-16 flex-shrink-0">À:</span>
+                                  <span className="text-sm text-gray-900 break-words">
+                                    {selectedMessage.toRecipients?.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
+                                  </span>
+                                </div>
+                                <div className="flex items-start">
+                                  <span className="text-sm text-gray-500 w-16 flex-shrink-0">Date:</span>
+                                  <span className="text-sm text-gray-900">
+                                    {new Date(selectedMessage.receivedDateTime).toLocaleString('fr-FR')}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2 ml-4 flex-shrink-0">
+                          <button 
+                            onClick={() => handleSaveMessage(selectedMessage)}
+                            className="p-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                            title="Sauvegarder le message"
+                          >
+                            <Download style={{ fontSize: 18 }} className="text-blue-600" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Contenu du message */}
+                    <div className="flex-1 p-6 overflow-y-auto">
+                      <div 
+                        className="prose prose-sm max-w-none text-gray-900 break-words message-content"
+                        dangerouslySetInnerHTML={{ 
+                          __html: selectedMessage.body?.content || selectedMessage.bodyPreview 
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Modals - MISE À JOUR POUR SUPPORTER LE TYPE DE MESSAGE */}
+        <SenderPathModal
+          isOpen={showSenderModal}
+          onClose={() => {
+            setShowSenderModal(false);
+            setCurrentSender(null);
+          }}
+          sender={currentSender}
+          onSave={handleSaveSenderPath}
+        />
+
+        <SenderPathsManager
+          isOpen={showPathsManager}
+          onClose={() => setShowPathsManager(false)}
+          onPathUpdated={handlePathsUpdated}
+        />
+
+        <GeneralSettings
+          isOpen={showGeneralSettings}
+          onClose={() => setShowGeneralSettings(false)}
+          onSettingsUpdated={(type, message, options) => {
+            if (type === 'success') {
+              success(message, options);
+            } else {
+              error(message, options);
+            }
+          }}
+        />
+
+        {/* Modal de sauvegarde */}
+        <SaveEmailModal
+          isOpen={saveModalOpen}
+          onClose={handleCloseSaveModal}
+          message={selectedMessageToSave}
+          messageType={currentTab} // Passer le type de message
+          onSave={handleSaveComplete}
+        />
+
+        {/* Daemon Settings Modal */}
+        <DaemonSettings
+          isOpen={showDaemonSettings}
+          onClose={() => setShowDaemonSettings(false)}
+          onNotification={(type, message, options) => {
+            if (type === 'success') {
+              success(message, options);
+            } else if (type === 'error') {
+              error(message, options);
+            } else if (type === 'info') {
+              info(message, options);
+            } else if (type === 'warning') {
+              warning(message, options);
+            }
+          }}
+        />
+
+        {/* NOUVEAU: Modal de recherche d'emails */}
+        <EmailSearch
+          isOpen={showEmailSearch}
+          onClose={() => setShowEmailSearch(false)}
+          messages={messages}
+          sentMessages={sentMessages}
+          onSelectMessage={handleSearchMessage}
+          onNotification={(type, message, options) => {
+            switch (type) {
+              case 'success':
+                success(message, options);
+                break;
+              case 'error':
+                error(message, options);
+                break;
+              case 'warning':
+                warning(message, options);
+                break;
+              default:
+                info(message, options);
+            }
+          }}
+        />
+      </div>
     </div>
   );
+
+  // NOUVEAU: Ajouter le raccourci clavier Ctrl+K
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowEmailSearch(true);
+      }
+      
+      // Fermer la recherche avec Escape
+      if (e.key === 'Escape' && showEmailSearch) {
+        setShowEmailSearch(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyPress);
+    return () => {
+      document.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [showEmailSearch]);
 };
 
 export default MainPage;
