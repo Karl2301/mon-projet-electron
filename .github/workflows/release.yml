@@ -53,11 +53,6 @@ jobs:
           fi
         shell: bash
         
-      - name: Debug Forge configuration
-        run: |
-          echo "Checking Forge configuration..."
-          node -e "const pkg = require('./package.json'); console.log('Forge config:', JSON.stringify(pkg.config.forge.plugins, null, 2));"
-        
       - name: Build and package for macOS
         if: matrix.os == 'macos-latest'
         run: |
@@ -85,22 +80,38 @@ jobs:
           npm run package
           npm run make
           
-      - name: List build artifacts
+      - name: List and prepare build artifacts
+        id: artifacts
         run: |
-          echo "Build artifacts:"
-          find ./out -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.rpm" -o -name "*.zip" \) | head -20
+          echo "Listing build artifacts:"
+          find ./out -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.rpm" -o -name "*.zip" -o -name "*.AppImage" \)
+          
+          # Créer un dossier pour les artefacts finaux
+          mkdir -p ./release-artifacts
+          
+          # Copier tous les artefacts avec des noms standardisés
+          if [ "${{ matrix.os }}" = "macos-latest" ]; then
+            find ./out -name "*.dmg" -exec cp {} ./release-artifacts/ \;
+            find ./out -name "*.zip" -exec cp {} ./release-artifacts/ \;
+          elif [ "${{ matrix.os }}" = "windows-latest" ]; then
+            find ./out -name "*.exe" -exec cp {} ./release-artifacts/ \;
+            find ./out -name "*.zip" -exec cp {} ./release-artifacts/ \;
+          elif [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            find ./out -name "*.deb" -exec cp {} ./release-artifacts/ \;
+            find ./out -name "*.rpm" -exec cp {} ./release-artifacts/ \;
+            find ./out -name "*.AppImage" -exec cp {} ./release-artifacts/ \;
+            find ./out -name "*.zip" -exec cp {} ./release-artifacts/ \;
+          fi
+          
+          echo "Final artifacts:"
+          ls -la ./release-artifacts/
         shell: bash
         
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.os }}-artifacts
-          path: |
-            out/**/*.dmg
-            out/**/*.exe
-            out/**/*.deb
-            out/**/*.rpm
-            out/**/*.zip
+          path: ./release-artifacts/*
           retention-days: 5
           
   create-release:
@@ -117,9 +128,20 @@ jobs:
         with:
           path: ./artifacts
           
-      - name: Display structure of downloaded files
-        run: ls -la ./artifacts/
-        
+      - name: Prepare release files
+        run: |
+          echo "Downloaded artifacts structure:"
+          find ./artifacts -type f
+          
+          # Créer un dossier pour tous les fichiers de release
+          mkdir -p ./release-files
+          
+          # Copier tous les artefacts dans un seul dossier
+          find ./artifacts -type f \( -name "*.dmg" -o -name "*.exe" -o -name "*.deb" -o -name "*.rpm" -o -name "*.zip" -o -name "*.AppImage" \) -exec cp {} ./release-files/ \;
+          
+          echo "Release files:"
+          ls -la ./release-files/
+          
       - name: Get version
         id: version
         run: |
@@ -141,7 +163,7 @@ jobs:
           
           - **macOS** : Fichier `.dmg` pour installation sur Mac
           - **Windows** : Fichier `.exe` pour installation sur Windows  
-          - **Linux** : Fichiers `.deb` (Ubuntu/Debian) et `.rpm` (CentOS/Fedora)
+          - **Linux** : Fichiers `.deb` (Ubuntu/Debian), `.rpm` (CentOS/Fedora) et `.AppImage` (portable)
           
           ### ✨ Fonctionnalités principales
           - Synchronisation avec Outlook via Microsoft Graph API
@@ -166,7 +188,6 @@ jobs:
           EOF
           
       - name: Create Release
-        id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.VERSION }}
@@ -174,11 +195,6 @@ jobs:
           body_path: ./release_notes.md
           draft: false
           prerelease: false
-          files: |
-            ./artifacts/**/*.dmg
-            ./artifacts/**/*.exe
-            ./artifacts/**/*.deb
-            ./artifacts/**/*.rpm
-            ./artifacts/**/*.zip
+          files: ./release-files/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
