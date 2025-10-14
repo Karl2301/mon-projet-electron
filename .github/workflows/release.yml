@@ -49,7 +49,7 @@ jobs:
       - name: Create oauth.config.json
         run: |
           if [ ! -f "./src/oauth.config.json" ]; then
-            echo '{"clientId":"${{ secrets.OAUTH_CLIENT_ID || 'demo-client-id' }}","tenant":"common","scopes":"offline_access Mail.Read"}' > ./src/oauth.config.json
+            echo '{"clientId":"${{ secrets.OAUTH_CLIENT_ID || 'demo-client-id' }}","tenant":"common","scopes":"offline_access Mail.Read Mail.ReadWrite"}' > ./src/oauth.config.json
           fi
         shell: bash
         
@@ -145,7 +145,7 @@ jobs:
           
           ### ✨ Fonctionnalités principales
           - Synchronisation avec Outlook via Microsoft Graph API
-          - Sauvegarde intelligente des emails
+          - Sauvegarde intelligente des emails dans des sous-dossiers INBOX
           - Gestion automatique des dossiers clients
           - Interface moderne et intuitive
           - Mode hors ligne avec cache
@@ -180,37 +180,5 @@ jobs:
             ./artifacts/**/*.deb
             ./artifacts/**/*.rpm
             ./artifacts/**/*.zip
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./artifacts/windows-latest-artifacts/out/make/squirrel.windows/x64/mon-projet-electron Setup ${{ steps.version.outputs.VERSION }}.exe
-          asset_name: mon-projet-electron-windows-${{ steps.version.outputs.VERSION }}.exe
-          asset_content_type: application/octet-stream
-        continue-on-error: true
-        
-      - name: Upload Linux DEB
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./artifacts/ubuntu-latest-artifacts/out/make/deb/x64/mon-projet-electron_${{ steps.version.outputs.VERSION }}_amd64.deb
-          asset_name: mon-projet-electron-linux-${{ steps.version.outputs.VERSION }}.deb
-          asset_content_type: application/octet-stream
-        continue-on-error: true
-        
-      - name: Upload Linux RPM
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./artifacts/ubuntu-latest-artifacts/out/make/rpm/x64/mon-projet-electron-${{ steps.version.outputs.VERSION }}-1.x86_64.rpm
-          asset_name: mon-projet-electron-linux-${{ steps.version.outputs.VERSION }}.rpm
-          asset_content_type: application/octet-stream
-        continue-on-error: true
-        
-      - name: Upload Windows ZIP (portable)
-        uses: actions/upload-release-asset@v1
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./artifacts/windows-latest-artifacts/out/make/zip/win32/x64/mon-projet-electron-win32-x64-${{ steps.version.outputs.VERSION }}.zip
-          asset_name: mon-projet-electron-windows-portable-${{ steps.version.outputs.VERSION }}.zip
-          asset_content_type: application/zip
-        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
