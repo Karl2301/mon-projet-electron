@@ -38,8 +38,11 @@ jobs:
       - name: Create assets directory and placeholder icon
         run: |
           mkdir -p ./assets
-          # Créer une icône temporaire pour les tests (1x1 pixel transparent)
-          echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" | base64 -d > ./assets/icon.png
+          
+          # Créer un vrai fichier PNG (16x16 pixels, transparent)
+          echo "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAACBFBMVEUAAADr6+/g5Org4+jn6e3p6+/n5+vf4+je4ube4ufn6+/l5+vn6+3f4+ff4+ff4+jd4ebl5ujn5+nm5+nk5unc4OXh5OfO2OLH0+DM1uHL1uHQ2eLh5Oje4ufo6OrG0+BDf7gka68gaa4obrAhaa5NhbvT2+Tl5uns6+uyxto7erZ2n8cucrIVYqsiaq8WY6srcLFwnMZAfbjE0d/o6erd4ubr6uu8zNwzdbR4ochMhbtFgLl3n8cvdLYncbjb5O729fbs7/Pg5Ojc4ea8zN0dZ60PXqlXjL6Ws9FklsaLsNRZksllj7l0hZZ/i5iPmKORm6XV2d/i5eq4ytscZq1ol8NjlMIgarB7nsBskLSbr8NkbHZHUl9gbXoyQ1UqO068w8rq7fG2yNtEgLlCf7gBVqY6fLtweIFETllCT10sPU+Jkp3///9HVmYxQlS+xMvp7PCOr893oMiBp82buddibns4SFhBUWEtP1F9h5M7S1wyQ1S/xczd4uft6+vv7Ozz8O/z8vFgbnw4SFk5SVprd4Tg4+W8wcdFVGS4v8fm6e1cank1RVc6SltDUmPX296epq4rPU+6wcjp7PHd4efg5Onn6u9jcH4wQVM8TF2Ai5YqPE40RVbDydDo6+/R1ty+xMzAx87CyM+7wcmwuMC9xMvFy9Lj5+zo6/Dn6+/n6u7m6u4B/BtYAAAADnRSTlMAQL+/gIBAv7+/QICAv8HrDEgAAAABb3JOVAHPoneaAAABDElEQVQY02NgYGTi4+Pj5+cDAWYWBgZWAUEhYRAQEhEQEBBlY2AXE5eQlJSSlJSQlhGQFeBgkJNXUFRSVlZWUVFVU5eVFWDQ0NTS1tHV0zcwNDI2kTU1ZTAz17WwtNK1trG1s3dwdHJmMHNxdXP38PTy9vH18w8IDGIwCw4JDQuPiIyKjomNi09IZDBLSk5JTUvPyMzKzsnNyy9gkHEuLCouKS0rr6jMqaquKWCo5aurb2hsam5pbctp7+gsYJAVkJUN6uru6e3rz5kwcdJkkMCUqdOmz5gZ1zdr9py58xjYge6dMnX+goWLFi9ZukyWk4FLFOgngeUrVq6ctmreamduBgYeXlk44GRjAAB6hUanOLRILwAAAABJRU5ErkJggg=="
+          
+          # Créer un fichier ICO pour Windows (copier du PNG)
           cp ./assets/icon.png ./assets/icon.ico
         shell: bash
         
