@@ -168,6 +168,73 @@ function loadTokens() {
   }
 }
 
+// Ajouter une fonction pour créer ou obtenir un dossier dans INBOX
+async function createOrGetInboxSubfolder(accessToken, folderName) {
+  try {
+    // D'abord, obtenir l'ID du dossier INBOX
+    const inboxResponse = await fetch(`https://graph.microsoft.com/v1.0/me/mailFolders/Inbox`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    if (!inboxResponse.ok) {
+      throw new Error('Impossible d\'accéder au dossier INBOX');
+    }
+    
+    const inboxData = await inboxResponse.json();
+    const inboxId = inboxData.id;
+    
+    // Vérifier si le sous-dossier existe déjà dans INBOX
+    const subfoldersResponse = await fetch(`https://graph.microsoft.com/v1.0/me/mailFolders/${inboxId}/childFolders`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    
+    if (subfoldersResponse.ok) {
+      const subfoldersData = await subfoldersResponse.json();
+      const existingFolder = subfoldersData.value.find(folder => folder.displayName === folderName);
+      
+      if (existingFolder) {
+        console.log(`📁 Sous-dossier "${folderName}" trouvé dans INBOX:`, existingFolder.id);
+        return {
+          id: existingFolder.id,
+          name: folderName,
+          created: false
+        };
+      }
+    }
+    
+    // Créer le sous-dossier dans INBOX s'il n'existe pas
+    console.log(`📁 Création du sous-dossier "${folderName}" dans INBOX...`);
+    const createResponse = await fetch(`https://graph.microsoft.com/v1.0/me/mailFolders/${inboxId}/childFolders`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        displayName: folderName
+      })
+    });
+    
+    if (!createResponse.ok) {
+      const errorData = await createResponse.json();
+      throw new Error(`Impossible de créer le sous-dossier: ${JSON.stringify(errorData)}`);
+    }
+    
+    const newFolder = await createResponse.json();
+    console.log(`✅ Sous-dossier "${folderName}" créé dans INBOX:`, newFolder.id);
+    
+    return {
+      id: newFolder.id,
+      name: folderName,
+      created: true
+    };
+    
+  } catch (error) {
+    console.error('Erreur lors de la création/récupération du sous-dossier INBOX:', error);
+    throw error;
+  }
+}
+
 // Create folder structure recursively
 async function createFolderStructure(basePath, structure) {
   for (const item of structure) {
@@ -432,50 +499,169 @@ function generateFilename(message, pattern, messageType = 'received', userEmail 
   return filename;
 }
 
-// Missing IPC handler for save-message
-ipcMain.handle('save-message', async (event, { message, senderPath, senderEmail, senderName }) => {
+// Remplacer le handler save-message par cette version complète :
+
+ipcMain.handle('save-message', async (event, { message, senderPath, senderEmail, senderName, outlookActions = {} }) => {
   try {
-    if (!senderPath) {
-      return { success: false, error: 'Aucun chemin configuré pour cet expéditeur' };
-    }
-    
-    // Get general settings to check for email deposit folder
-    const settings = loadGeneralSettings();
-    let finalPath = senderPath;
-    
-    // If emailDepositFolder is configured, use it as a subfolder
-    if (settings.emailDepositFolder && settings.emailDepositFolder.trim() !== '') {
-      finalPath = path.join(senderPath, settings.emailDepositFolder);
-    }
-    
-    // Create filename
-    const date = new Date(message.receivedDateTime);
-    const dateStr = date.toISOString().split('T')[0];
-    const timeStr = date.toTimeString().split(' ')[0].replace(/:/g, '-');
-    const subject = (message.subject || 'Sans_sujet').replace(/[<>:"/\\|?*]/g, '_').substring(0, 50);
-    const fileName = `${dateStr}_${timeStr}_${subject}.json`;
-    
-    const filePath = path.join(finalPath, fileName);
-    
-    // Ensure directory exists
-    if (!fs.existsSync(finalPath)) {
-      fs.mkdirSync(finalPath, { recursive: true });
-    }
-    
-    // Save file
-    fs.writeFileSync(filePath, JSON.stringify(message, null, 2), 'utf8');
-    
-    return { 
-      success: true, 
-      filePath,
-      fileName,
+    console.log('📧 Sauvegarde du message:', {
+      messageId: message.id,
+      subject: message.subject,
+      senderPath,
       senderEmail,
-      senderName,
-      depositFolder: settings.emailDepositFolder || null
+      outlookActions
+    });
+
+    // Load general settings
+    const generalSettings = loadGeneralSettings();
+    const fileFormatSettings = generalSettings.fileFormat || {};
+    
+    // Generate filename
+    const pattern = fileFormatSettings.filenamePattern || '{date}_{time}_{subject}';
+    const filename = generateFilename(message, pattern, 'received');
+    
+    // Determine full save path
+    let actualSavePath = senderPath;
+    let depositFolderUsed = false;
+    let depositFolder = null;
+    
+    // Check if we should use deposit folder
+    if (generalSettings.receivedEmailDepositFolder) {
+      depositFolder = generalSettings.receivedEmailDepositFolder;
+      const depositPath = path.join(senderPath, depositFolder);
+      
+      if (fs.existsSync(depositPath)) {
+        actualSavePath = depositPath;
+        depositFolderUsed = true;
+        console.log(`📁 Utilisation du dossier de dépôt: ${depositPath}`);
+      } else {
+        console.log(`⚠️ Dossier de dépôt non trouvé: ${depositPath}, sauvegarde directe`);
+      }
+    }
+    
+    const fullPath = path.join(actualSavePath, filename);
+    
+    // Save message content
+    const messageData = {
+      id: message.id,
+      subject: message.subject,
+      from: message.from,
+      toRecipients: message.toRecipients,
+      receivedDateTime: message.receivedDateTime,
+      bodyPreview: message.bodyPreview,
+      body: message.body,
+      hasAttachments: message.hasAttachments,
+      importance: message.importance,
+      isRead: message.isRead,
+      savedAt: new Date().toISOString(),
+      senderInfo: {
+        email: senderEmail,
+        name: senderName,
+        folderPath: senderPath
+      }
     };
+    
+    await fs.promises.writeFile(fullPath, JSON.stringify(messageData, null, 2), 'utf8');
+    console.log('✅ Message sauvegardé:', fullPath);
+    
+    // === ACTIONS OUTLOOK AVEC SOUS-DOSSIERS INBOX ===
+    const outlookResults = {
+      folderCreated: false,
+      movePerformed: false,
+      markAsReadPerformed: false,
+      targetFolder: null,
+      errors: []
+    };
+    
+    console.log('🔍 Vérification des conditions Outlook:', {
+      hasToken: !!tokenStore?.access_token,
+      moveToFiledRequested: outlookActions.moveToFiled,
+      markAsReadRequested: outlookActions.markAsRead,
+      outlookActions: outlookActions
+    });
+
+    if (tokenStore?.access_token && (outlookActions.moveToFiled || outlookActions.markAsRead)) {
+      console.log('🔄 Début des actions Outlook avec OutlookHandler...');
+      
+      try {
+        const OutlookHandler = require('../outlook-handler');
+        const outlookHandler = new OutlookHandler(tokenStore.access_token);
+        
+        // Action 1: Déplacer vers un sous-dossier de INBOX
+        if (outlookActions.moveToFiled) {
+          try {
+            console.log('📁 Création/récupération du sous-dossier INBOX...');
+            const folderName = 'EmailManager Filed';
+            const inboxSubfolder = await createOrGetInboxSubfolder(tokenStore.access_token, folderName);
+            
+            console.log('📁 Sous-dossier INBOX:', {
+              id: inboxSubfolder.id,
+              name: inboxSubfolder.name,
+              created: inboxSubfolder.created
+            });
+            
+            console.log('📧 Déplacement du message vers le sous-dossier...');
+            await outlookHandler.moveMessage(message.id, inboxSubfolder.id);
+            
+            outlookResults.movePerformed = true;
+            outlookResults.folderCreated = inboxSubfolder.created;
+            outlookResults.targetFolder = `INBOX/${inboxSubfolder.name}`;
+            
+            console.log(`✅ Message déplacé vers le sous-dossier INBOX: ${inboxSubfolder.name}`);
+            
+          } catch (moveError) {
+            console.error('❌ Erreur lors du déplacement vers sous-dossier INBOX:', moveError);
+            outlookResults.errors.push(`Déplacement: ${moveError.message}`);
+          }
+        }
+        
+        // Action 2: Marquer comme lu
+        if (outlookActions.markAsRead && !message.isRead) {
+          try {
+            console.log('👁️ Marquage du message comme lu...');
+            await outlookHandler.markAsRead(message.id);
+            
+            outlookResults.markAsReadPerformed = true;
+            console.log('✅ Message marqué comme lu');
+            
+          } catch (markError) {
+            console.error('❌ Erreur lors du marquage comme lu:', markError);
+            outlookResults.errors.push(`Marquage lu: ${markError.message}`);
+          }
+        } else if (outlookActions.markAsRead && message.isRead) {
+          console.log('ℹ️ Message déjà marqué comme lu, action ignorée');
+        }
+        
+        console.log('🎉 Actions Outlook terminées:', outlookResults);
+        
+      } catch (outlookError) {
+        console.error('❌ Erreur générale lors des actions Outlook:', outlookError);
+        outlookResults.errors.push(`Outlook général: ${outlookError.message}`);
+      }
+    } else {
+      console.log('ℹ️ Pas d\'actions Outlook demandées ou token manquant');
+      if (!tokenStore?.access_token) {
+        console.log('❌ Pas de token d\'accès disponible');
+      }
+      if (!outlookActions.moveToFiled && !outlookActions.markAsRead) {
+        console.log('ℹ️ Aucune action Outlook activée');
+      }
+    }
+    
+    return {
+      success: true,
+      fileName: filename,
+      actualSavePath,
+      depositFolder,
+      depositFolderUsed,
+      outlookActions: outlookResults
+    };
+
   } catch (error) {
-    console.error('Error saving message:', error);
-    return { success: false, error: error.message };
+    console.error('Erreur lors de la sauvegarde du message:', error);
+    return {
+      success: false,
+      error: error.message
+    };
   }
 });
 
@@ -1843,192 +2029,72 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
       errors: []
     };
 
-    // Vérifier si les actions Outlook sont demandées
     console.log('🔍 Vérification des conditions Outlook:', {
       hasToken: !!tokenStore?.access_token,
       moveToFiledRequested: outlookActions.moveToFiled,
-      markAsReadRequested: outlookActions.markAsRead,
-      tokenStoreContent: tokenStore ? 'présent' : 'absent'
+      markAsReadRequested: outlookActions.markAsRead
     });
 
     if (tokenStore?.access_token && (outlookActions.moveToFiled || outlookActions.markAsRead)) {
-      console.log('🔄 Début des actions Outlook...');
+      console.log('🔄 Début des actions Outlook avec OutlookHandler...');
       
       try {
-        // Action 1: Déplacer vers le dossier "Filed"
+        const OutlookHandler = require('../outlook-handler');
+        const outlookHandler = new OutlookHandler(tokenStore.access_token);
+        
+        // Action 1: Déplacer vers un sous-dossier de INBOX
         if (outlookActions.moveToFiled) {
-          console.log('📁 Étape 1: Recherche des dossiers existants...');
-          
-          const foldersResponse = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders', {
-            headers: { 
-              'Authorization': `Bearer ${tokenStore.access_token}`,
-              'Content-Type': 'application/json'
-            },
-          });
-          
-          console.log('📁 Réponse API dossiers:', {
-            status: foldersResponse.status,
-            statusText: foldersResponse.statusText,
-            ok: foldersResponse.ok
-          });
-          
-          if (!foldersResponse.ok) {
-            const errorText = await foldersResponse.text();
-            console.error('❌ Erreur récupération dossiers:', {
-              status: foldersResponse.status,
-              error: errorText
-            });
-            throw new Error(`Erreur récupération dossiers: ${foldersResponse.status} - ${errorText}`);
-          }
-          
-          const foldersData = await foldersResponse.json();
-          console.log('📁 Dossiers récupérés:', {
-            count: foldersData.value?.length,
-            folderNames: foldersData.value?.map(f => f.displayName)
-          });
-          
-          let targetFolder = foldersData.value?.find(folder => 
-            folder.displayName === 'EmailManager Filed' || 
-            folder.displayName === 'Filed Items'
-          );
-          
-          console.log('📁 Dossier cible trouvé:', targetFolder ? targetFolder.displayName : 'Aucun');
-          
-          // Créer le dossier s'il n'existe pas
-          if (!targetFolder) {
-            console.log('📁 Étape 2: Création du dossier EmailManager Filed...');
+          try {
+            console.log('📁 Création/récupération du sous-dossier INBOX...');
+            const folderName = 'EmailManager Filed';
+            const inboxSubfolder = await createOrGetInboxSubfolder(tokenStore.access_token, folderName);
             
-            const createPayload = {
-              displayName: 'EmailManager Filed'
-            };
-            
-            console.log('📁 Payload de création:', createPayload);
-            
-            const createResponse = await fetch('https://graph.microsoft.com/v1.0/me/mailFolders', {
-              method: 'POST',
-              headers: { 
-                'Authorization': `Bearer ${tokenStore.access_token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(createPayload)
+            console.log('📁 Sous-dossier INBOX:', {
+              id: inboxSubfolder.id,
+              name: inboxSubfolder.name,
+              created: inboxSubfolder.created
             });
             
-            console.log('📁 Réponse création dossier:', {
-              status: createResponse.status,
-              statusText: createResponse.statusText,
-              ok: createResponse.ok
-            });
+            console.log('📧 Déplacement du message vers le sous-dossier...');
+            await outlookHandler.moveMessage(message.id, inboxSubfolder.id);
             
-            if (!createResponse.ok) {
-              const errorText = await createResponse.text();
-              console.error('❌ Erreur création dossier:', {
-                status: createResponse.status,
-                error: errorText
-              });
-              throw new Error(`Erreur création dossier: ${createResponse.status} - ${errorText}`);
-            }
-            
-            targetFolder = await createResponse.json();
-            outlookActionsResult.folderCreated = true;
-            console.log('✅ Dossier EmailManager Filed créé:', targetFolder);
-          }
-          
-          // Déplacer le message
-          if (targetFolder) {
-            console.log('📧 Étape 3: Déplacement du message...');
-            console.log('📧 Détails du déplacement:', {
-              messageId: message.id,
-              targetFolderId: targetFolder.id,
-              targetFolderName: targetFolder.displayName
-            });
-            
-            const movePayload = {
-              destinationId: targetFolder.id
-            };
-            
-            console.log('📧 Payload de déplacement:', movePayload);
-            
-            const moveResponse = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${message.id}/move`, {
-              method: 'POST',
-              headers: { 
-                'Authorization': `Bearer ${tokenStore.access_token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(movePayload)
-            });
-            
-            console.log('📧 Réponse déplacement:', {
-              status: moveResponse.status,
-              statusText: moveResponse.statusText,
-              ok: moveResponse.ok
-            });
-            
-            if (!moveResponse.ok) {
-              const errorText = await moveResponse.text();
-              console.error('❌ Erreur déplacement:', {
-                status: moveResponse.status,
-                error: errorText
-              });
-              throw new Error(`Erreur déplacement: ${moveResponse.status} - ${errorText}`);
-            }
-            
-            const moveResult = await moveResponse.json();
             outlookActionsResult.movePerformed = true;
-            outlookActionsResult.targetFolder = targetFolder.displayName;
-            console.log('✅ Email déplacé avec succès:', moveResult);
+            outlookActionsResult.folderCreated = inboxSubfolder.created;
+            outlookActionsResult.targetFolder = `INBOX/${inboxSubfolder.name}`;
+            
+            console.log(`✅ Message déplacé vers le sous-dossier INBOX: ${inboxSubfolder.name}`);
+            
+          } catch (moveError) {
+            console.error('❌ Erreur lors du déplacement vers sous-dossier INBOX:', moveError);
+            outlookActionsResult.errors.push(`Déplacement: ${moveError.message}`);
           }
         }
         
         // Action 2: Marquer comme lu
         if (outlookActions.markAsRead && !message.isRead) {
-          console.log('👁️ Étape 4: Marquage comme lu...');
-          
-          const markPayload = {
-            isRead: true
-          };
-          
-          console.log('👁️ Payload de marquage:', markPayload);
-          
-          const markResponse = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${message.id}`, {
-            method: 'PATCH',
-            headers: { 
-              'Authorization': `Bearer ${tokenStore.access_token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(markPayload)
-          });
-          
-          console.log('👁️ Réponse marquage:', {
-            status: markResponse.status,
-            statusText: markResponse.statusText,
-            ok: markResponse.ok
-          });
-          
-          if (!markResponse.ok) {
-            const errorText = await markResponse.text();
-            console.error('❌ Erreur marquage:', {
-              status: markResponse.status,
-              error: errorText
-            });
-            throw new Error(`Erreur marquage: ${markResponse.status} - ${errorText}`);
+          try {
+            console.log('👁️ Marquage du message comme lu...');
+            await outlookHandler.markAsRead(message.id);
+            
+            outlookActionsResult.markAsReadPerformed = true;
+            console.log('✅ Message marqué comme lu');
+            
+          } catch (markError) {
+            console.error('❌ Erreur lors du marquage comme lu:', markError);
+            outlookActionsResult.errors.push(`Marquage lu: ${markError.message}`);
           }
-          
-          const markResult = await markResponse.json();
-          outlookActionsResult.markAsReadPerformed = true;
-          console.log('✅ Email marqué comme lu:', markResult);
+        } else if (outlookActions.markAsRead && message.isRead) {
+          console.log('ℹ️ Message déjà marqué comme lu, action ignorée');
         }
         
-        console.log('🎉 Actions Outlook terminées avec succès:', outlookActionsResult);
+        console.log('🎉 Actions Outlook terminées:', outlookActionsResult);
         
       } catch (outlookError) {
-        console.error('❌ Erreur lors des actions Outlook:', outlookError);
-        outlookActionsResult.errors.push(outlookError.message);
+        console.error('❌ Erreur générale lors des actions Outlook:', outlookError);
+        outlookActionsResult.errors.push(`Outlook général: ${outlookError.message}`);
       }
     } else {
-      console.log('ℹ️ Pas d\'actions Outlook:', {
-        reason: !tokenStore?.access_token ? 'Pas de token' : 'Pas d\'actions demandées',
-        outlookActions
-      });
+      console.log('ℹ️ Pas d\'actions Outlook demandées ou token manquant');
     }
     
     // Sauvegarder le chemin pour le futur si demandé
@@ -2153,56 +2219,95 @@ ipcMain.handle('outlook:get-sent-messages-paginated', async (event, { accessToke
 });
 
 // Enhanced save sent message handler - BASÉ SUR LE DESTINATAIRE
-ipcMain.handle('save-sent-message-with-suggestion', async (event, { message }) => {
+ipcMain.handle('save-sent-message', async (event, { message, senderPath, recipientEmail, recipientName, outlookActions = {} }) => {
   try {
-    const recipientEmail = message.toRecipients?.[0]?.emailAddress?.address;
-    const recipientName = message.toRecipients?.[0]?.emailAddress?.name;
+    console.log('📧 Sauvegarde du message envoyé:', {
+      messageId: message.id,
+      subject: message.subject,
+      senderPath,
+      recipientEmail,
+      outlookActions
+    });
+
+    // Load general settings
+    const generalSettings = loadGeneralSettings();
+    const fileFormatSettings = generalSettings.fileFormat || {};
     
-    if (!recipientEmail || !recipientName) {
-      return { 
-        success: false, 
-        error: 'Informations destinataire manquantes' 
-      };
+    // Generate filename for sent message
+    const pattern = fileFormatSettings.filenamePatternSent || 'SENT_{date}_{time}_{subject}';
+    const userEmail = message.from?.emailAddress?.address || 'user@example.com';
+    const filename = generateFilename(message, pattern, 'sent', userEmail);
+    
+    // Determine full save path
+    let actualSavePath = senderPath;
+    let depositFolderUsed = false;
+    let depositFolder = null;
+    
+    // Check if we should use sent deposit folder
+    if (generalSettings.sentEmailDepositFolder) {
+      depositFolder = generalSettings.sentEmailDepositFolder;
+      const depositPath = path.join(senderPath, depositFolder);
+      
+      if (fs.existsSync(depositPath)) {
+        actualSavePath = depositPath;
+        depositFolderUsed = true;
+        console.log(`📁 Utilisation du dossier de dépôt pour envoyés: ${depositPath}`);
+      } else {
+        console.log(`⚠️ Dossier de dépôt pour envoyés non trouvé: ${depositPath}, sauvegarde directe`);
+      }
     }
     
-    // Utiliser la nouvelle fonction de suggestion pour les emails envoyés
-    const suggestion = suggestClientForSentEmail(recipientEmail, recipientName);
+    const fullPath = path.join(actualSavePath, filename);
     
-    // Obtenir tous les clients existants
-    const allPaths = loadSenderPaths();
-    const existingClients = Object.values(allPaths).map(p => ({
-      clientName: path.basename(p.folder_path),
-      folderPath: p.folder_path,
-      senderName: p.sender_name,
-      senderEmail: p.sender_email,
-      // Ajouter une indication si c'est le même correspondant
-      isCorrespondent: p.sender_email === recipientEmail
-    }));
-    
-    const sortedClients = existingClients.sort((a, b) => {
-      // Mettre les correspondants existants en premier
-      if (a.isCorrespondent && !b.isCorrespondent) return -1;
-      if (!a.isCorrespondent && b.isCorrespondent) return 1;
-      
-      const nameComparison = a.senderName.localeCompare(b.senderName);
-      if (nameComparison !== 0) return nameComparison;
-      return a.senderEmail.localeCompare(b.senderEmail);
-    });
-    
-    return {
-      success: true,
-      suggestion,
-      existingClients: sortedClients,
-      recipientEmail,
-      recipientName,
+    // Save sent message content
+    const messageData = {
+      id: message.id,
+      subject: message.subject,
+      from: message.from,
+      toRecipients: message.toRecipients,
+      sentDateTime: message.sentDateTime,
+      bodyPreview: message.bodyPreview,
+      body: message.body,
+      hasAttachments: message.hasAttachments,
+      importance: message.importance,
+      savedAt: new Date().toISOString(),
+      recipientInfo: {
+        email: recipientEmail,
+        name: recipientName,
+        folderPath: senderPath
+      },
       messageType: 'sent'
     };
     
+    await fs.promises.writeFile(fullPath, JSON.stringify(messageData, null, 2), 'utf8');
+    console.log('✅ Message envoyé sauvegardé:', fullPath);
+    
+    // Les messages envoyés ne sont généralement pas déplacés car ils sont déjà dans SentItems
+    // Mais on peut garder la logique pour la cohérence si nécessaire
+    const outlookResults = {
+      folderCreated: false,
+      movePerformed: false,
+      markAsReadPerformed: false,
+      targetFolder: null,
+      errors: []
+    };
+    
+    return {
+      success: true,
+      fileName: filename,
+      actualSavePath,
+      depositFolder,
+      depositFolderUsed,
+      outlookActions: outlookResults,
+      messageType: 'sent'
+    };
+
   } catch (error) {
-    console.error('Error getting sent message save suggestion:', error);
-    return { 
-      success: false, 
-      error: error.message 
+    console.error('Erreur lors de la sauvegarde du message envoyé:', error);
+    return {
+      success: false,
+      error: error.message,
+      messageType: 'sent'
     };
   }
 });

@@ -46,8 +46,8 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
         'Mises à jour incluses',
         'Activation immédiate'
       ],
-      recommended: true,
-      accent: 'indigo',
+      recommended: false,
+      accent: 'orange',
       type: "/ans",
       devise: "€"
     },
@@ -98,13 +98,13 @@ const PricingPage = ({ onSelectPlan, onBack }) => {
         border: 'border-blue-200',
         button: recommended ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200'
       },
-      indigo: {
-        badge: 'bg-indigo-600',
-        icon: 'text-indigo-600',
-        iconBg: 'bg-indigo-50',
-        check: 'text-indigo-500',
-        border: 'border-indigo-300',
-        button: recommended ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200'
+      orange: {
+        badge: 'bg-orange-600',
+        icon: 'text-orange-600',
+        iconBg: 'bg-orange-50',
+        check: 'text-orange-500',
+        border: 'border-orange-300',
+        button: recommended ? 'bg-orange-600 hover:bg-orange-700 text-white' : 'bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200'
       },
       emerald: {
         badge: 'bg-emerald-600',
