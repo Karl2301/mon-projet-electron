@@ -1106,8 +1106,8 @@ const MainPage = ({ user, onLogout, onShowPricing }) => {
                 {/* Vue détaillée du message - MISE À JOUR POUR LES ENVOYÉS */}
                 {selectedMessage && (
                   <div className="w-2/3 bg-white/80 backdrop-blur-sm rounded-2xl border border-gray-100 shadow-sm flex flex-col">
-                    {/* Header du message */}
-                    <div className="p-6 border-b border-gray-100 flex-shrink-0">
+                    {/* Header du message - CORRECTION DU Z-INDEX ET TOP */}
+                    <div className="p-6 border-b border-gray-100 flex-shrink-0 sticky top-16 z-40 bg-white/90 backdrop-blur-md rounded-t-2xl">
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex-1 min-w-0 pr-4">
                           <div className="flex items-center mb-2">
