@@ -20,7 +20,7 @@
     "release": "npm run build-css:prod && node -r dotenv/config -e \"console.log('⚠️  Make sure the GitHub repository https://github.com/Karl2301/mon-projet-electron exists before publishing!'); require('child_process').execSync('electron-forge publish', {stdio: 'inherit', env: {...process.env}})\"",
     "create-repo": "node -r dotenv/config -e \"const { execSync } = require('child_process'); try { execSync('gh repo create Karl2301/mon-projet-electron --public --description \\\"Application de gestion et sauvegarde d\\'emails Outlook\\\"', {stdio: 'inherit'}); console.log('✅ Repository created successfully!'); } catch(e) { console.log('❌ Error creating repository. Make sure you have GitHub CLI installed and are authenticated.'); }\"",
     "git-status": "git status --porcelain",
-    "git-commit": "git add . && git commit -m \"chore: prepare for release\"",
+    "git-commit": "git add . && (git diff --cached --quiet || git commit -m \"chore: prepare for release\")",
     "version:patch": "npm run git-commit && npm version patch && git push && git push --tags",
     "version:minor": "npm run git-commit && npm version minor && git push && git push --tags",
     "version:major": "npm run git-commit && npm version major && git push && git push --tags",
