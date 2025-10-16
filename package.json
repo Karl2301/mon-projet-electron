@@ -37,7 +37,7 @@
       "packagerConfig": {
         "name": "Mon Projet Electron",
         "executableName": "mon-projet-electron",
-        "icon": "./assets/icon",
+        "icon": "./assets/icons",
         "asar": true,
         "extraResource": [
           "./src/oauth.config.json"
@@ -57,7 +57,7 @@
           "config": {
             "name": "mon_projet_electron",
             "setupExe": "MonProjetElectronSetup.exe",
-            "setupIcon": "./assets/icon.ico"
+            "setupIcon": "./assets/icons/win/icon.ico"
           },
           "platforms": [
             "win32"
@@ -81,7 +81,7 @@
               "Office",
               "Email"
             ],
-            "icon": "./assets/icon.png",
+            "icon": "./assets/icons/mac/icon.icns",
             "homepage": "https://github.com/Karl2301/mon-projet-electron",
             "maintainer": "Karl Rahuel",
             "section": "utils",
@@ -113,7 +113,7 @@
               "Office",
               "Email"
             ],
-            "icon": "./assets/icon.png",
+            "icon": "./assets/icons/png/128x128.png",
             "homepage": "https://github.com/Karl2301/mon-projet-electron",
             "license": "MIT",
             "requires": [
