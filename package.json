@@ -13,6 +13,7 @@
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "node -r dotenv/config -e \"console.log('⚠️  Make sure the GitHub repository https://github.com/Karl2301/mon-projet-electron exists before publishing!'); require('child_process').execSync('electron-forge publish', {stdio: 'inherit', env: {...process.env}})\"",
+    "publish-ci": "electron-forge publish",
     "lint": "echo \"No linting configured\"",
     "build-css": "tailwindcss -i ./src/index.css -o ./dist/output.css --watch",
     "build-css:prod": "tailwindcss -i ./src/index.css -o ./dist/output.css --minify",
