@@ -168,7 +168,7 @@
               "name": "mon-projet-electron"
             },
             "prerelease": false,
-            "draft": true
+            "draft": false
           }
         }
       ]
