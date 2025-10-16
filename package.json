@@ -12,11 +12,16 @@
     "web:preview": "vite preview dist-web --port 5000 --host --open",
     "package": "electron-forge package",
     "make": "electron-forge make",
-    "publish": "electron-forge publish",
+    "publish": "node -r dotenv/config -e \"console.log('⚠️  Make sure the GitHub repository https://github.com/Karl2301/mon-projet-electron exists before publishing!'); require('child_process').execSync('electron-forge publish', {stdio: 'inherit', env: {...process.env}})\"",
     "lint": "echo \"No linting configured\"",
     "build-css": "tailwindcss -i ./src/index.css -o ./dist/output.css --watch",
     "build-css:prod": "tailwindcss -i ./src/index.css -o ./dist/output.css --minify",
-    "release": "npm run build-css:prod && electron-forge publish"
+    "release": "npm run build-css:prod && node -r dotenv/config -e \"console.log('⚠️  Make sure the GitHub repository https://github.com/Karl2301/mon-projet-electron exists before publishing!'); require('child_process').execSync('electron-forge publish', {stdio: 'inherit', env: {...process.env}})\"",
+    "create-repo": "node -r dotenv/config -e \"const { execSync } = require('child_process'); try { execSync('gh repo create Karl2301/mon-projet-electron --public --description \\\"Application de gestion et sauvegarde d\\'emails Outlook\\\"', {stdio: 'inherit'}); console.log('✅ Repository created successfully!'); } catch(e) { console.log('❌ Error creating repository. Make sure you have GitHub CLI installed and are authenticated.'); }\"",
+    "version:patch": "npm version patch && git push && git push --tags",
+    "version:minor": "npm version minor && git push && git push --tags",
+    "version:major": "npm version major && git push && git push --tags",
+    "publish-ci": "electron-forge publish"
   },
   "keywords": [],
   "author": "karlrahuel",
@@ -71,7 +76,7 @@
               "Email"
             ],
             "icon": "./assets/icon.png",
-            "homepage": "https://github.com/karlrahuel/mon-projet-electron",
+            "homepage": "https://github.com/Karl2301/mon-projet-electron",
             "maintainer": "Karl Rahuel",
             "section": "utils",
             "priority": "optional",
@@ -103,7 +108,7 @@
               "Email"
             ],
             "icon": "./assets/icon.png",
-            "homepage": "https://github.com/karlrahuel/mon-projet-electron",
+            "homepage": "https://github.com/Karl2301/mon-projet-electron",
             "license": "MIT",
             "requires": [
               "gconf2",
@@ -153,7 +158,7 @@
           "name": "@electron-forge/publisher-github",
           "config": {
             "repository": {
-              "owner": "karlrahuel",
+              "owner": "Karl2301",
               "name": "mon-projet-electron"
             },
             "prerelease": false,
@@ -173,12 +178,14 @@
     "@electron-forge/plugin-vite": "^7.9.0",
     "@electron/fuses": "^1.8.0",
     "autoprefixer": "^10.4.21",
+    "dotenv": "^16.6.1",
     "electron": "^38.2.2",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18",
     "vite": "^5.4.20"
   },
   "dependencies": {
+    "@electron-forge/publisher-github": "^7.10.2",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.4",
