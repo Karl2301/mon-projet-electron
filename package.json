@@ -36,7 +36,7 @@
       "packagerConfig": {
         "name": "Mon Projet Electron",
         "executableName": "mon-projet-electron",
-        "icon": "./assets/icons",
+        "icon": "./assets/icon",
         "asar": true,
         "extraResource": [
           "./src/oauth.config.json"
@@ -56,7 +56,7 @@
           "config": {
             "name": "mon_projet_electron",
             "setupExe": "MonProjetElectronSetup.exe",
-            "setupIcon": "./assets/icons/win/icon.ico"
+            "setupIcon": "./assets/icon.ico"
           },
           "platforms": [
             "win32"
@@ -80,7 +80,6 @@
               "Office",
               "Email"
             ],
-            "icon": "./assets/icons/mac/icon.icns",
             "homepage": "https://github.com/Karl2301/mon-projet-electron",
             "maintainer": "Karl Rahuel",
             "section": "utils",
@@ -95,7 +94,8 @@
             ],
             "recommends": [
               "pulseaudio"
-            ]
+            ],
+            "icon": "./assets/icon.png"
           },
           "platforms": [
             "linux"
@@ -112,7 +112,6 @@
               "Office",
               "Email"
             ],
-            "icon": "./assets/icons/png/128x128.png",
             "homepage": "https://github.com/Karl2301/mon-projet-electron",
             "license": "MIT",
             "requires": [
@@ -122,7 +121,8 @@
               "libXtst",
               "nss"
             ],
-            "vendor": "Karl Rahuel"
+            "vendor": "Karl Rahuel",
+            "icon": "./assets/icon.png"
           },
           "platforms": [
             "linux"
