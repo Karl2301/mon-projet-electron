@@ -3,7 +3,6 @@
   "productName": "mon-projet-electron",
   "version": "2.0.5",
   "description": "My Electron application description",
-  "type": "module",
   "main": ".vite/build/main.js",
   "scripts": {
     "dev": "electron-forge start",
