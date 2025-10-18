@@ -1,20 +1,19 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Search,
   Close,
-  Email,
-  Person,
-  FilterList,
+  Search,
   Clear,
+  FilterList,
   History,
-  TrendingUp
+  TrendingUp,
+  Email,
+  Folder,
+  Schedule
 } from '@mui/icons-material';
 
 const EmailSearch = ({ 
   isOpen, 
   onClose, 
-  messages = [], 
-  sentMessages = [], 
   onSelectMessage,
   onNotification 
 }) => {
@@ -22,125 +21,67 @@ const EmailSearch = ({
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
-    type: 'all', // 'all', 'received', 'sent'
-    timeRange: 'all', // 'all', 'today', 'week', 'month'
+    type: 'all',
+    timeRange: 'all',
     hasAttachments: false
   });
   const [searchHistory, setSearchHistory] = useState([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [savedEmailsCount, setSavedEmailsCount] = useState(0);
   
   const searchInputRef = useRef(null);
   const searchTimeoutRef = useRef(null);
 
-  // Charger l'historique de recherche depuis localStorage
+  // Charger l'historique et compter les emails sauvegardés
   useEffect(() => {
     if (isOpen) {
-      const savedHistory = localStorage.getItem('emailSearchHistory');
-      if (savedHistory) {
-        try {
-          setSearchHistory(JSON.parse(savedHistory));
-        } catch (error) {
-          console.error('Erreur lors du chargement de l\'historique:', error);
-        }
-      }
-      // Focus automatique sur l'input
-      setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 100);
+      searchInputRef.current?.focus();
+      loadSearchHistory();
+      loadSavedEmailsCount();
     }
   }, [isOpen]);
 
-  // Sauvegarder l'historique de recherche
+  const loadSearchHistory = () => {
+    try {
+      const history = localStorage.getItem('emailSearchHistory');
+      if (history) {
+        setSearchHistory(JSON.parse(history));
+      }
+    } catch (error) {
+      console.error('Erreur chargement historique:', error);
+    }
+  };
+
+  const loadSavedEmailsCount = async () => {
+    try {
+      const result = await window.electronAPI.getSavedEmailsIndex();
+      if (result.success) {
+        setSavedEmailsCount(result.emails.length);
+      }
+    } catch (error) {
+      console.error('Erreur chargement index:', error);
+    }
+  };
+
   const saveSearchHistory = (newHistory) => {
     try {
       localStorage.setItem('emailSearchHistory', JSON.stringify(newHistory));
       setSearchHistory(newHistory);
     } catch (error) {
-      console.error('Erreur lors de la sauvegarde de l\'historique:', error);
+      console.error('Erreur sauvegarde historique:', error);
     }
   };
 
-  // Ajouter une recherche à l'historique
   const addToSearchHistory = (query) => {
     if (!query.trim() || query.length < 2) return;
     
     const newHistory = [
       query.trim(),
       ...searchHistory.filter(item => item !== query.trim())
-    ].slice(0, 10); // Garder seulement les 10 dernières recherches
+    ].slice(0, 10);
     
     saveSearchHistory(newHistory);
   };
-
-  // Combiner tous les messages pour la recherche
-  const allMessages = useMemo(() => {
-    const received = messages.map(msg => ({ ...msg, messageType: 'received' }));
-    const sent = sentMessages.map(msg => ({ ...msg, messageType: 'sent' }));
-    return [...received, ...sent];
-  }, [messages, sentMessages]);
-
-  // Fonction de recherche optimisée
-  const searchMessages = useMemo(() => {
-    return (query, filters) => {
-      if (!query.trim()) return [];
-
-      const searchTerm = query.toLowerCase().trim();
-      const now = new Date();
-      
-      return allMessages.filter(message => {
-        // Filtrer par type de message
-        if (filters.type !== 'all' && message.messageType !== filters.type) {
-          return false;
-        }
-
-        // Filtrer par plage de temps
-        if (filters.timeRange !== 'all') {
-          const messageDate = new Date(message.receivedDateTime || message.sentDateTime);
-          const daysDiff = Math.floor((now - messageDate) / (1000 * 60 * 60 * 24));
-          
-          switch (filters.timeRange) {
-            case 'today':
-              if (daysDiff > 0) return false;
-              break;
-            case 'week':
-              if (daysDiff > 7) return false;
-              break;
-            case 'month':
-              if (daysDiff > 30) return false;
-              break;
-          }
-        }
-
-        // Filtrer par pièces jointes
-        if (filters.hasAttachments && !message.hasAttachments) {
-          return false;
-        }
-
-        // Recherche dans le contenu
-        const searchableContent = [
-          message.subject || '',
-          message.bodyPreview || '',
-          message.from?.emailAddress?.name || '',
-          message.from?.emailAddress?.address || '',
-          ...(message.toRecipients || []).map(recipient => 
-            `${recipient.emailAddress?.name || ''} ${recipient.emailAddress?.address || ''}`
-          ),
-          ...(message.ccRecipients || []).map(recipient => 
-            `${recipient.emailAddress?.name || ''} ${recipient.emailAddress?.address || ''}`
-          )
-        ].join(' ').toLowerCase();
-
-        // Recherche avec support des mots multiples
-        const searchWords = searchTerm.split(' ').filter(word => word.length > 0);
-        return searchWords.every(word => searchableContent.includes(word));
-      }).sort((a, b) => {
-        // Trier par pertinence et date
-        const dateA = new Date(a.receivedDateTime || a.sentDateTime);
-        const dateB = new Date(b.receivedDateTime || b.sentDateTime);
-        return dateB - dateA;
-      });
-    };
-  }, [allMessages]);
 
   // Effectuer la recherche avec debounce
   useEffect(() => {
@@ -156,10 +97,28 @@ const EmailSearch = ({
 
     setIsSearching(true);
 
-    searchTimeoutRef.current = setTimeout(() => {
-      const results = searchMessages(searchQuery, activeFilters);
-      setSearchResults(results);
-      setIsSearching(false);
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const result = await window.electronAPI.searchSavedEmails({
+          query: searchQuery,
+          filters: activeFilters
+        });
+
+        if (result.success) {
+          setSearchResults(result.results);
+        } else {
+          setSearchResults([]);
+          onNotification?.('error', 'Erreur lors de la recherche', {
+            details: result.error
+          });
+        }
+      } catch (error) {
+        console.error('Erreur recherche:', error);
+        setSearchResults([]);
+        onNotification?.('error', 'Erreur lors de la recherche');
+      } finally {
+        setIsSearching(false);
+      }
     }, 300);
 
     return () => {
@@ -167,7 +126,7 @@ const EmailSearch = ({
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [searchQuery, activeFilters, searchMessages]);
+  }, [searchQuery, activeFilters]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -176,7 +135,32 @@ const EmailSearch = ({
     }
   };
 
-  const handleSelectResult = (message) => {
+  const handleSelectResult = (email) => {
+    // Reconstruire l'objet message pour compatibilité
+    const message = {
+      id: email.messageId,
+      subject: email.subject,
+      bodyPreview: email.bodyPreview,
+      receivedDateTime: email.receivedDateTime || email.sentDateTime,
+      sentDateTime: email.sentDateTime,
+      from: {
+        emailAddress: {
+          address: email.senderEmail,
+          name: email.senderName
+        }
+      },
+      toRecipients: [{
+        emailAddress: {
+          address: email.recipientEmail,
+          name: email.recipientName
+        }
+      }],
+      hasAttachments: email.hasAttachments,
+      messageType: email.messageType,
+      savedPath: email.savedPath,
+      folderPath: email.folderPath
+    };
+    
     onSelectMessage(message);
     onClose();
   };
@@ -189,8 +173,8 @@ const EmailSearch = ({
     saveSearchHistory([]);
   };
 
-  const getMessageIcon = (message) => {
-    return message.messageType === 'sent' ? 
+  const getMessageIcon = (email) => {
+    return email.messageType === 'sent' ? 
       <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center">
         <span className="text-green-600 text-xs">↗</span>
       </div> :
@@ -199,17 +183,16 @@ const EmailSearch = ({
       </div>;
   };
 
-  const getContactInfo = (message) => {
-    if (message.messageType === 'sent') {
-      const recipient = message.toRecipients?.[0];
+  const getContactInfo = (email) => {
+    if (email.messageType === 'sent') {
       return {
-        name: recipient?.emailAddress?.name || 'Destinataire inconnu',
-        email: recipient?.emailAddress?.address || ''
+        name: email.recipientName,
+        email: email.recipientEmail
       };
     } else {
       return {
-        name: message.from?.emailAddress?.name || 'Expéditeur inconnu',
-        email: message.from?.emailAddress?.address || ''
+        name: email.senderName,
+        email: email.senderEmail
       };
     }
   };
@@ -222,7 +205,7 @@ const EmailSearch = ({
     
     words.forEach(word => {
       const regex = new RegExp(`(${word})`, 'gi');
-      highlightedText = highlightedText.replace(regex, '<mark class="bg-yellow-200 px-1 rounded">$1</mark>');
+      highlightedText = highlightedText.replace(regex, '<mark>$1</mark>');
     });
     
     return highlightedText;
@@ -242,10 +225,10 @@ const EmailSearch = ({
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">
-                  Recherche d'emails
+                  Recherche d'emails sauvegardés
                 </h3>
                 <p className="text-sm text-gray-600">
-                  Recherchez dans vos messages reçus et envoyés
+                  {savedEmailsCount} email{savedEmailsCount !== 1 ? 's' : ''} indexé{savedEmailsCount !== 1 ? 's' : ''} dans l'arborescence
                 </p>
               </div>
             </div>
@@ -261,7 +244,6 @@ const EmailSearch = ({
         {/* Search Form */}
         <div className="p-6 border-b border-gray-100 flex-shrink-0">
           <form onSubmit={handleSearchSubmit} className="space-y-4">
-            {/* Search Input */}
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-5 w-5 text-gray-400" />
@@ -271,7 +253,7 @@ const EmailSearch = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Rechercher par sujet, expéditeur, contenu ou adresse email..."
+                placeholder="Rechercher par sujet, expéditeur, contenu..."
                 className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl bg-white placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
               {searchQuery && (
@@ -285,7 +267,6 @@ const EmailSearch = ({
               )}
             </div>
 
-            {/* Filters */}
             <div className="flex items-center justify-between">
               <button
                 type="button"
@@ -312,7 +293,6 @@ const EmailSearch = ({
               )}
             </div>
 
-            {/* Advanced Filters */}
             {showFilters && (
               <div className="bg-gray-50 rounded-lg p-4 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -367,7 +347,6 @@ const EmailSearch = ({
         {/* Content */}
         <div className="flex-1 overflow-hidden">
           {!searchQuery ? (
-            /* Search History */
             <div className="p-6">
               {searchHistory.length > 0 ? (
                 <div>
@@ -400,16 +379,15 @@ const EmailSearch = ({
                 <div className="text-center py-12">
                   <Search className="text-gray-300 mx-auto mb-4" style={{ fontSize: 48 }} />
                   <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                    Recherchez dans vos emails
+                    Recherchez dans vos emails sauvegardés
                   </h3>
                   <p className="text-gray-600">
-                    Tapez votre recherche ci-dessus pour commencer
+                    Seuls les emails enregistrés dans l'arborescence sont recherchés
                   </p>
                 </div>
               )}
             </div>
           ) : (
-            /* Search Results */
             <div className="overflow-y-auto h-full">
               {searchResults.length === 0 && !isSearching ? (
                 <div className="text-center py-12">
@@ -418,74 +396,46 @@ const EmailSearch = ({
                     Aucun résultat trouvé
                   </h3>
                   <p className="text-gray-600">
-                    Essayez avec d'autres mots-clés ou modifiez vos filtres
+                    Aucun email sauvegardé ne correspond à votre recherche
                   </p>
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {searchResults.map((message, index) => {
-                    const contact = getContactInfo(message);
+                  {searchResults.map((email, index) => {
+                    const contact = getContactInfo(email);
                     return (
-                      <div
-                        key={`${message.id}-${index}`}
-                        onClick={() => handleSelectResult(message)}
-                        className="p-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                      <button
+                        key={index}
+                        onClick={() => handleSelectResult(email)}
+                        className="w-full p-4 hover:bg-blue-25 transition-colors text-left"
                       >
                         <div className="flex items-start space-x-3">
-                          {getMessageIcon(message)}
-                          
+                          {getMessageIcon(email)}
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between mb-1">
                               <h4 
-                                className="text-sm font-medium text-gray-900 truncate"
-                                dangerouslySetInnerHTML={{
-                                  __html: highlightSearchTerm(contact.name, searchQuery)
-                                }}
+                                className="font-medium text-gray-900 truncate"
+                                dangerouslySetInnerHTML={{ __html: highlightSearchTerm(contact.name, searchQuery) }}
                               />
-                              <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
-                                {new Date(message.receivedDateTime || message.sentDateTime).toLocaleDateString('fr-FR')}
+                              <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
+                                {new Date(email.receivedDateTime || email.sentDateTime).toLocaleDateString('fr-FR')}
                               </span>
                             </div>
-                            
                             <p 
-                              className="text-xs text-gray-600 mb-1 truncate"
-                              dangerouslySetInnerHTML={{
-                                __html: highlightSearchTerm(contact.email, searchQuery)
-                              }}
+                              className="text-sm text-gray-600 mb-1"
+                              dangerouslySetInnerHTML={{ __html: highlightSearchTerm(email.subject, searchQuery) }}
                             />
-                            
                             <p 
-                              className="text-sm text-gray-800 mb-1 truncate font-medium"
-                              dangerouslySetInnerHTML={{
-                                __html: highlightSearchTerm(message.subject || 'Sans sujet', searchQuery)
-                              }}
+                              className="text-sm text-gray-500 line-clamp-2 mb-2"
+                              dangerouslySetInnerHTML={{ __html: highlightSearchTerm(email.bodyPreview, searchQuery) }}
                             />
-                            
-                            <p 
-                              className="text-xs text-gray-600 line-clamp-2"
-                              dangerouslySetInnerHTML={{
-                                __html: highlightSearchTerm(message.bodyPreview || '', searchQuery)
-                              }}
-                            />
-                            
-                            <div className="flex items-center mt-2 space-x-2">
-                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                message.messageType === 'sent' 
-                                  ? 'bg-green-100 text-green-800' 
-                                  : 'bg-blue-100 text-blue-800'
-                              }`}>
-                                {message.messageType === 'sent' ? 'Envoyé' : 'Reçu'}
-                              </span>
-                              
-                              {message.hasAttachments && (
-                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                  📎 Pièce jointe
-                                </span>
-                              )}
+                            <div className="flex items-center space-x-2 text-xs text-gray-500">
+                              <Folder style={{ fontSize: 14 }} />
+                              <span className="truncate">{email.clientName || 'Dossier client'}</span>
                             </div>
                           </div>
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>

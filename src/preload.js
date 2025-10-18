@@ -72,6 +72,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createFiledFolder: (params) => ipcRenderer.invoke('outlook:create-filed-folder', params),
   moveMessage: (params) => ipcRenderer.invoke('outlook:move-message', params),
   markAsRead: (params) => ipcRenderer.invoke('outlook:mark-as-read', params),
+  
+  // NOUVEAU: Gestion des emails sauvegardés
+  getSavedEmailsIndex: () => ipcRenderer.invoke('emails:get-saved-index'),
+  searchSavedEmails: (params) => ipcRenderer.invoke('emails:search-saved', params),
+  
+  // Pour le debug
+  debugIndexEmail: (emailData) => ipcRenderer.invoke('emails:debug-index', emailData),
 });
 
 // AJOUTER CE LOG À LA FIN

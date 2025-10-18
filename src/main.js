@@ -40,6 +40,8 @@ const GENERAL_SETTINGS_FILE = path.join(app.getPath('userData'), 'general_settin
 const TOKEN_STORE_PATH = path.join(app.getPath('userData'), 'token.store.json');
 const ENCRYPTION_KEY = crypto.createHash('sha256').update('votre_phrase_secrete').digest(); // 32 bytes
 const IV = Buffer.alloc(16, 0); // IV statique pour démo, à randomiser en prod
+const SAVED_EMAILS_INDEX_FILE = path.join(app.getPath('userData'), 'saved_emails_index.json');
+
 
 let tokenStore = null; // store last tokens in memory for this session
 
@@ -924,6 +926,103 @@ app.on('window-all-closed', () => {
 
 // === IPC HANDLERS ===
 
+// Handler pour récupérer les emails sauvegardés
+ipcMain.handle('emails:get-saved-index', async () => {
+  try {
+    console.log('🔍 Récupération de l\'index des emails');
+    const index = loadSavedEmailsIndex();
+    return { success: true, emails: index };
+  } catch (error) {
+    console.error('❌ Erreur lors de la récupération de l\'index:', error);
+    return { success: false, error: error.message, emails: [] };
+  }
+});
+
+ipcMain.handle('emails:search-saved', async (event, { query, filters = {} }) => {
+  try {
+    console.log('🔎 Recherche dans l\'index:', { query, filters });
+    let emails = loadSavedEmailsIndex();
+    console.log('📊 Emails dans l\'index:', emails.length);
+    
+    // Filtrer par type de message
+    if (filters.type && filters.type !== 'all') {
+      emails = emails.filter(email => email.messageType === filters.type);
+      console.log('📊 Après filtre type:', emails.length);
+    }
+    
+    // Filtrer par période
+    if (filters.timeRange && filters.timeRange !== 'all') {
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      
+      emails = emails.filter(email => {
+        const emailDate = new Date(email.receivedDateTime || email.sentDateTime);
+        switch (filters.timeRange) {
+          case 'today':
+            return emailDate >= startOfToday;
+          case 'week':
+            return emailDate >= startOfWeek;
+          case 'month':
+            return emailDate >= startOfMonth;
+          default:
+            return true;
+        }
+      });
+      console.log('📊 Après filtre période:', emails.length);
+    }
+    
+    // Filtrer par pièces jointes
+    if (filters.hasAttachments) {
+      emails = emails.filter(email => email.hasAttachments === true);
+      console.log('📊 Après filtre pièces jointes:', emails.length);
+    }
+    
+    // Recherche textuelle
+    if (query && query.trim()) {
+      const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 0);
+      console.log('🔤 Termes de recherche:', searchTerms);
+      
+      emails = emails.filter(email => {
+        const searchableText = [
+          email.subject || '',
+          email.bodyPreview || '',
+          email.senderEmail || '',
+          email.senderName || '',
+          email.recipientEmail || '',
+          email.recipientName || '',
+          email.clientName || ''
+        ].join(' ').toLowerCase();
+        
+        return searchTerms.every(term => searchableText.includes(term));
+      });
+      console.log('📊 Après recherche textuelle:', emails.length);
+    }
+    
+    // Trier par date (plus récent en premier)
+    emails.sort((a, b) => {
+      const dateA = new Date(a.receivedDateTime || a.sentDateTime);
+      const dateB = new Date(b.receivedDateTime || b.sentDateTime);
+      return dateB - dateA;
+    });
+    
+    console.log('✅ Résultats de recherche:', emails.length);
+    return { success: true, results: emails };
+  } catch (error) {
+    console.error('❌ Erreur lors de la recherche:', error);
+    return { success: false, error: error.message, results: [] };
+  }
+});
+
+// Handler de debug
+ipcMain.handle('emails:debug-index', async (event, emailData) => {
+  console.log('🐛 DEBUG - Données email reçues:', emailData);
+  const index = loadSavedEmailsIndex();
+  console.log('🐛 DEBUG - Index actuel:', index);
+  return { success: true, indexSize: index.length };
+});
+
 // NOUVEAU: Fonction pour obtenir la liste des dossiers Outlook
 ipcMain.handle('outlook:get-folders', async (event, { accessToken }) => {
   const token = accessToken || (tokenStore && tokenStore.access_token);
@@ -1441,6 +1540,61 @@ ipcMain.handle('outlook:get-messages-cached', async (event, { accessToken, top =
 // Path for app state storage
 const APP_STATE_FILE = path.join(app.getPath('userData'), 'app_state.json');
 const CACHED_MESSAGES_FILE = path.join(app.getPath('userData'), 'cached_messages.json');
+
+function loadSavedEmailsIndex() {
+  try {
+    if (fs.existsSync(SAVED_EMAILS_INDEX_FILE)) {
+      const data = fs.readFileSync(SAVED_EMAILS_INDEX_FILE, 'utf8');
+      const index = JSON.parse(data);
+      console.log('📇 Index chargé:', index.length, 'emails');
+      return index;
+    }
+    console.log('📇 Aucun index trouvé, création d\'un nouveau');
+  } catch (error) {
+    console.error('❌ Erreur lors du chargement de l\'index des emails:', error);
+  }
+  return [];
+}
+
+function saveSavedEmailsIndex(index) {
+  try {
+    fs.writeFileSync(SAVED_EMAILS_INDEX_FILE, JSON.stringify(index, null, 2), 'utf8');
+    console.log('💾 Index sauvegardé:', index.length, 'emails');
+  } catch (error) {
+    console.error('❌ Erreur lors de la sauvegarde de l\'index:', error);
+  }
+}
+
+function addEmailToIndex(emailData) {
+  console.log('📝 Ajout d\'un email à l\'index:', {
+    messageId: emailData.messageId,
+    subject: emailData.subject,
+    type: emailData.messageType
+  });
+  
+  const index = loadSavedEmailsIndex();
+  
+  // Vérifier si l'email existe déjà
+  const existingIndex = index.findIndex(e => e.messageId === emailData.messageId);
+  
+  if (existingIndex >= 0) {
+    console.log('✏️ Mise à jour de l\'email existant dans l\'index');
+    index[existingIndex] = {
+      ...index[existingIndex],
+      ...emailData,
+      updatedAt: new Date().toISOString()
+    };
+  } else {
+    console.log('✨ Nouvel email ajouté à l\'index');
+    index.push({
+      ...emailData,
+      savedAt: new Date().toISOString()
+    });
+  }
+  
+  saveSavedEmailsIndex(index);
+  return index;
+}
 
 // Function to clean email content and remove problematic CID images
 function cleanEmailContent(message) {
@@ -2139,6 +2293,25 @@ ipcMain.handle('save-message-to-path', async (event, { message, chosenPath, save
     };
     
     console.log('✅ Sauvegarde complète - Résultat final:', result);
+
+    const emailIndexData = {
+      messageId: message.id,
+      messageType: 'received',
+      subject: message.subject || 'Sans sujet',
+      bodyPreview: message.bodyPreview || '',
+      senderEmail: senderEmail,
+      senderName: senderName,
+      recipientEmail: message.from?.emailAddress?.address,
+      recipientName: message.from?.emailAddress?.address,
+      receivedDateTime: message.receivedDateTime,
+      hasAttachments: message.hasAttachments || false,
+      savedPath: filePath,
+      folderPath: depositFolderName || null,
+      clientName: clientInfo?.name || null
+    };
+    
+    addEmailToIndex(emailIndexData);
+
     return result;
     
   } catch (error) {
@@ -2428,6 +2601,24 @@ ipcMain.handle('save-sent-message-to-path', async (event, { message, chosenPath,
       fileFormat: fileFormat,
       filenamePattern: pattern
     };
+
+    const emailIndexData = {
+      messageId: message.id,
+      messageType: 'sent',
+      subject: message.subject || 'Sans sujet',
+      bodyPreview: message.bodyPreview || '',
+      senderEmail: userEmail,
+      senderName: 'User',
+      recipientEmail: message.toRecipients?.[0]?.emailAddress?.address || 'unknown',
+      recipientName: message.toRecipients?.[0]?.emailAddress?.name || message.toRecipients?.[0]?.emailAddress?.address || 'Destinataire inconnu',
+      sentDateTime: message.sentDateTime,
+      hasAttachments: message.hasAttachments || false,
+      savedPath: fullPath, // fullPath doit être défini dans le code existant
+      folderPath: chosenPath,
+      clientName: clientInfo?.name || null
+    };
+    
+    addEmailToIndex(emailIndexData);
     
     return result;
     
